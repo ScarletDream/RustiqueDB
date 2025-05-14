@@ -25,3 +25,6 @@ yarn.lock
 
 # 忽略测试生成的临时文件
 coverage/
+
+# 忽略提交规则
+commitlint.config.js
