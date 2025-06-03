@@ -1,5 +1,9 @@
-use crate::database::DataType;
-use std::collections::HashMap;
+use crate::database::DataType as DbDataType;
+use sqlparser::{
+    ast::*,
+    dialect::GenericDialect,
+    parser::Parser,
+};
 
 #[derive(Debug)]
 pub enum SqlAst {
@@ -10,7 +14,7 @@ pub enum SqlAst {
     },
     CreateTable {
         table_name: String,
-        columns: Vec<(String, DataType, bool, bool)>,
+        columns: Vec<(String, DbDataType, bool, bool)>,
     },
     Insert {
         table: String,
@@ -28,172 +32,179 @@ pub enum SqlAst {
 }
 
 pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
-    let input = input.trim().trim_end_matches(';').to_string();
-    let tokens: Vec<&str> = input.split_whitespace().collect();
-    
-    if tokens.is_empty() {
-        return Err("Empty SQL input".to_string());
-    }
+    let dialect = GenericDialect {};
+    let mut parser = Parser::new(&dialect);
+    let ast = parser
+        .try_with_sql(input)
+        .map_err(|e| e.to_string())?
+        .parse_statement()
+        .map_err(|e| e.to_string())?;
 
-    match tokens[0].to_uppercase().as_str() {
-        "SELECT" => parse_select(&tokens),
-        "CREATE" => parse_create(&tokens),
-        "INSERT" => parse_insert(&tokens),
-        "UPDATE" => parse_update(&tokens),
-        "DELETE" => parse_delete(&tokens),
-        _ => Err(format!("Unsupported SQL command: {}", tokens[0])),
-    }
-}
-
-fn parse_select(tokens: &[&str]) -> Result<SqlAst, String> {
-    // 定位FROM子句
-    let idx_from = tokens.iter().position(|&t| t.to_uppercase() == "FROM")
-        .ok_or("Missing 'FROM' clause")?;
-    
-    // 解析列名
-    let cols_str = tokens[1..idx_from].join(" ");
-    let columns: Vec<String> = if cols_str.trim() == "*" {
-        vec!["*".to_string()]
-    } else {
-        cols_str.split(',').map(|s| s.trim().to_string()).collect()
-    };
-    
-    // 解析表名
-    let table = tokens.get(idx_from + 1)
-        .ok_or("Missing table name after FROM")?
-        .to_string();
-    
-    // 解析WHERE子句
-    let where_clause = tokens.iter().position(|&t| t.to_uppercase() == "WHERE")
-        .map(|idx| tokens[idx+1..].join(" "));
-    
-    Ok(SqlAst::Select {
-        table,
-        columns,
-        where_clause,
-    })
-}
-
-fn parse_create(tokens: &[&str]) -> Result<SqlAst, String> {
-    if tokens.len() < 3 || tokens[1].to_uppercase() != "TABLE" {
-        return Err("Invalid CREATE statement".into());
-    }
-    
-    let table_name = tokens[2].to_string();
-    
-    // 查找括号位置
-    let start = tokens.iter().position(|&t| t == "(")
-        .ok_or("Expected '(' after table name")?;
-    let end = tokens.iter().position(|&t| t == ")")
-        .ok_or("Expected ')' after column definitions")?;
-    
-    // 解析列定义
-    let col_defs = tokens[start+1..end].join(" ");
-    let col_parts: Vec<&str> = col_defs.split(',').collect();
-    
-    let mut columns = Vec::new();
-    for col in col_parts {
-        let parts: Vec<&str> = col.trim().split_whitespace().collect();
-        if parts.len() < 2 {
-            return Err(format!("Invalid column definition: {}", col));
+    match ast {
+        Statement::Query(query) => parse_select(&query),
+        Statement::CreateTable { name, columns, constraints, .. } => {
+            parse_create_table(name, columns, constraints)
         }
+        Statement::Insert { table_name, source, .. } => parse_insert(table_name, source),
+        Statement::Update { table, assignments, selection, .. } => {
+            parse_update(table, assignments, selection)
+        }
+        Statement::Delete { tables, selection, .. } => {
+            if tables.len() != 1 {
+                return Err("DELETE statement only supports single table".into());
+            }
+            let table_name = tables[0].to_string();
+            parse_delete(table_name, selection)
+        }
+        _ => Err("Unsupported SQL command".to_string()),
+    }
+}
+
+fn parse_select(query: &Query) -> Result<SqlAst, String> {
+    match query.body.as_ref() {
+        SetExpr::Select(select) => {
+            let table = select
+                .from
+                .first()
+                .and_then(|t| match &t.relation {
+                    TableFactor::Table { name, .. } => Some(name.to_string()),
+                    _ => None,
+                })
+                .ok_or("Missing table name in FROM clause")?;
+
+            let columns = select
+                .projection
+                .iter()
+                .map(|p| match p {
+                    SelectItem::UnnamedExpr(Expr::Identifier(ident)) => Ok(ident.value.clone()),
+                    SelectItem::Wildcard(_) => Ok("*".to_string()),
+                    _ => Err("Unsupported column expression".to_string()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let where_clause = select
+                .selection
+                .as_ref()
+                .map(|expr| expr.to_string());
+
+            Ok(SqlAst::Select {
+                table,
+                columns,
+                where_clause,
+            })
+        }
+        _ => Err("Unsupported query type".into()),
+    }
+}
+
+fn parse_create_table(
+    name: ObjectName,
+    columns: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
+) -> Result<SqlAst, String> {
+    let table_name = name.to_string();
+    
+    let primary_keys: Vec<&str> = constraints
+        .iter()
+        .filter_map(|c| match c {
+            TableConstraint::Unique {
+                is_primary: true,
+                columns,
+                ..
+            } => Some(columns.iter().map(|c| c.value.as_str()).collect::<Vec<_>>()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    let mut parsed_columns = Vec::new();
+    for col in columns {
+        let col_name = col.name.value;
         
-        let col_name = parts[0].to_string();
-        let data_type = if parts[1].to_uppercase().starts_with("VARCHAR") {
-            // 处理 VARCHAR(长度) 或 VARCHAR
-            if parts[1].contains('(') && parts[1].contains(')') {
-                let len_str = parts[1].split('(').nth(1).unwrap().split(')').next().unwrap();
-                let len = len_str.parse::<u32>()
-                    .map_err(|_| "Invalid length for VARCHAR")?;
-                DataType::Varchar(len)
-            } else {
-                // 默认长度 255
-                DataType::Varchar(255)
+        // 关键修复：正确处理 CharacterLength 类型
+        let data_type = match &col.data_type {
+            DataType::Int(_) => DbDataType::Int(10),
+            DataType::Varchar(Some(len_info)) => {
+                // 从 CharacterLength 结构体中提取 length 字段
+                DbDataType::Varchar(len_info.length as u32)
             }
-        } else {
-            match parts[1].to_uppercase().as_str() {
-                "INT" => DataType::Int(10),
-                _ => return Err(format!("Unsupported data type: {}", parts[1])),
-            }
+            DataType::Varchar(None) => DbDataType::Varchar(255),
+            _ => return Err(format!("Unsupported data type: {}", col.data_type)),
         };
         
-        // 解析约束
-        let is_primary = col.contains("PRIMARY KEY");
-        let not_null = col.contains("NOT NULL");
+        let is_primary = primary_keys.contains(&col_name.as_str());
+        let not_null = col
+            .options
+            .iter()
+            .any(|opt| matches!(opt.option, ColumnOption::NotNull));
         
-        columns.push((col_name, data_type, is_primary, not_null));
+        parsed_columns.push((col_name, data_type, is_primary, not_null));
     }
     
     Ok(SqlAst::CreateTable {
         table_name,
-        columns,
+        columns: parsed_columns,
     })
 }
 
-fn parse_insert(tokens: &[&str]) -> Result<SqlAst, String> {
-    if tokens.len() < 4 || tokens[1].to_uppercase() != "INTO" {
-        return Err("Invalid INSERT statement".into());
-    }
+fn parse_insert(table_name: ObjectName, source: Box<Query>) -> Result<SqlAst, String> {
+    let table = table_name.to_string();
     
-    let table = tokens[2].to_string();
-    
-    // 查找VALUES关键字
-    let idx_values = tokens.iter().position(|&t| t.to_uppercase() == "VALUES")
-        .ok_or("Expected VALUES after table name")?;
-    
-    // 提取值列表
-    let values_str = tokens[idx_values+1..].join(" ");
-    let values: Vec<String> = values_str.split(',')
-        .map(|s| s.trim().trim_matches(|c| c == '(' || c == ')').to_string())
-        .collect();
+    let values = match source.body.as_ref() {
+        SetExpr::Values(values) => {
+            values
+                .rows
+                .first()
+                .map(|row| {
+                    row.iter()
+                        .map(|expr| expr.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        }
+        _ => return Err("Only VALUES clause is supported".into()),
+    };
     
     Ok(SqlAst::Insert { table, values })
 }
 
-fn parse_update(tokens: &[&str]) -> Result<SqlAst, String> {
-    if tokens.len() < 4 {
-        return Err("Invalid UPDATE statement".into());
-    }
+fn parse_update(
+    table: TableWithJoins,
+    assignments: Vec<Assignment>,
+    selection: Option<Expr>,
+) -> Result<SqlAst, String> {
+    let table_name = match table.relation {
+        TableFactor::Table { name, .. } => name.to_string(),
+        _ => return Err("Invalid table reference".into()),
+    };
     
-    let table = tokens[1].to_string();
+    let set = assignments
+        .into_iter()
+        .map(|assg| {
+            if assg.id.len() != 1 {
+                return Err(format!(
+                    "Expected single column name, found {}",
+                    assg.id.len()
+                ));
+            }
+            let column_name = assg.id[0].value.clone();
+            let value = assg.value.to_string();
+            Ok((column_name, value))
+        })
+        .collect::<Result<Vec<(String, String)>, String>>()?;
     
-    // 查找SET关键字
-    let idx_set = tokens.iter().position(|&t| t.to_uppercase() == "SET")
-        .ok_or("Expected SET after table name")?;
-    
-    // 解析SET子句
-    let set_clause = tokens[idx_set+1..].join(" ");
-    let mut set = Vec::new();
-    
-    for pair in set_clause.split(',') {
-        let parts: Vec<&str> = pair.split('=').map(|s| s.trim()).collect();
-        if parts.len() != 2 {
-            return Err(format!("Invalid SET pair: {}", pair));
-        }
-        set.push((parts[0].to_string(), parts[1].to_string()));
-    }
-    
-    // 解析WHERE子句
-    let where_clause = tokens.iter().position(|&t| t.to_uppercase() == "WHERE")
-        .map(|idx| tokens[idx+1..].join(" "));
+    let where_clause = selection.map(|expr| expr.to_string());
     
     Ok(SqlAst::Update {
-        table,
+        table: table_name,
         set,
         where_clause,
     })
 }
 
-fn parse_delete(tokens: &[&str]) -> Result<SqlAst, String> {
-    if tokens.len() < 3 || tokens[1].to_uppercase() != "FROM" {
-        return Err("Invalid DELETE statement".into());
-    }
-    
-    let table = tokens[2].to_string();
-    
-    // 解析WHERE子句
-    let where_clause = tokens.iter().position(|&t| t.to_uppercase() == "WHERE")
-        .map(|idx| tokens[idx+1..].join(" "));
+fn parse_delete(table_name: String, selection: Option<Expr>) -> Result<SqlAst, String> {
+    let table = table_name;
+    let where_clause = selection.map(|expr| expr.to_string());
     
     Ok(SqlAst::Delete {
         table,

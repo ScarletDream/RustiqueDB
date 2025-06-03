@@ -127,6 +127,44 @@
           "19"
         ]
       ]
+    },
+    {
+      "name": "students",
+      "columns": [
+        {
+          "name": "id",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "name",
+          "data_type": {
+            "Varchar": 255
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "email",
+          "data_type": {
+            "Varchar": 255
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "age",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": false,
+          "not_null": false
+        }
+      ],
+      "data": []
     }
   ]
 }
