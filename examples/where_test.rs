@@ -12,7 +12,7 @@ fn main() -> Result<(), String> {
     db.insert("users", vec!["3", "Charlie", ""])?;
 
     // 测试条件查询
-    let data = db.select("users", vec!["name", "age"], Some("age IS NULL"))?;
+    let data = db.select("users", vec!["name", "age"], Some("age IS NULL"), None)?;
     println!("Age IS NULL:\n{}", format::format_table(vec!["Name".into(), "Age".into()], data));
 
     Ok(())

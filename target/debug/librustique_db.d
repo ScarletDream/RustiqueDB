@@ -1,0 +1,1 @@
+D:\download\RustiqueDB\target\debug\librustique_db.rlib: D:\download\RustiqueDB\src\database\mod.rs D:\download\RustiqueDB\src\error.rs D:\download\RustiqueDB\src\format.rs D:\download\RustiqueDB\src\lib.rs D:\download\RustiqueDB\src\parser.rs
