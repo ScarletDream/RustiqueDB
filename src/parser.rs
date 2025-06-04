@@ -11,6 +11,7 @@ pub enum SqlAst {
         table: String,
         columns: Vec<String>,
         where_clause: Option<String>,
+        order_by: Vec<(String, bool)>,
     },
     CreateTable {
         table_name: String,
@@ -98,10 +99,21 @@ fn parse_select(query: &Query) -> Result<SqlAst, String> {
                 .as_ref()
                 .map(|expr| expr.to_string());
 
+            let mut order_by = Vec::new();
+            for expr in &query.order_by {  // 直接迭代&Vec
+                match &expr.expr {
+                    Expr::Identifier(ident) => {
+                        order_by.push((ident.value.clone(), !expr.asc.unwrap_or(true)));
+                    },
+                    _ => return Err("Only column names are supported in ORDER BY".into()),
+                }
+            }
+
             Ok(SqlAst::Select {
                 table,
                 columns,
                 where_clause,
+                order_by,
             })
         }
         _ => Err("Unsupported query type".into()),

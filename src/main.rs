@@ -113,11 +113,16 @@ fn main() {
         match parse_sql(sql_input) {
             Ok(ast) => {
                 match ast {
-                    SqlAst::Select { table, columns, where_clause } => {
+                    SqlAst::Select { table, columns, where_clause, order_by } => {
                         let cols_ref: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
                         let cond_str = where_clause.as_deref();
+
+                        let order_by_ref: Vec<(&str, bool)> = order_by
+                            .iter()
+                            .map(|(col, desc)| (col.as_str(), *desc))
+                            .collect();
                         
-                        match db.select(&table, cols_ref, cond_str, None) {
+                        match db.select(&table, cols_ref, cond_str, Some(order_by_ref)) {
                             Ok(data) => {
                                 match format_table_from_db(&db, &table, columns.iter().map(|s| s.as_str()).collect(), data) {
                                     Ok(table_str) => println!("{}", table_str),

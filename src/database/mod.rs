@@ -347,11 +347,19 @@ impl Database {
                 for (idx, data_type, desc) in &sort_specs {
                     let ordering = match data_type {
                         DataType::Int(_) => {
-                            let a_val = a[*idx].parse::<i32>().unwrap_or(0);
-                            let b_val = b[*idx].parse::<i32>().unwrap_or(0);
-                            a_val.cmp(&b_val)
+                            let a_val = a[*idx].parse::<i32>();
+                            let b_val = b[*idx].parse::<i32>();
+                            match (a_val, b_val) {
+                                (Ok(a), Ok(b)) => a.cmp(&b),
+                                (Err(_), _) => std::cmp::Ordering::Greater,
+                                (_, Err(_)) => std::cmp::Ordering::Less,
+                            }
                         },
-                        DataType::Varchar(_) => a[*idx].cmp(&b[*idx]),
+                        DataType::Varchar(_) => {
+                            if a[*idx].is_empty() { std::cmp::Ordering::Greater }
+                            else if b[*idx].is_empty() { std::cmp::Ordering::Less }
+                            else { a[*idx].cmp(&b[*idx]) }
+                        },
                     };
 
                     if *desc {
