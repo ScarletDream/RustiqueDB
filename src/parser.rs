@@ -49,14 +49,17 @@ pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
         Statement::Update { table, assignments, selection, .. } => {
             parse_update(table, assignments, selection)
         }
-        Statement::Delete { tables, selection, .. } => {
+        /*Statement::Delete { tables, selection, .. } => {
             if tables.len() != 1 {
                 return Err("DELETE statement only supports single table".into());
             }
-            let table_name = tables[0].to_string();
-            parse_delete(table_name, selection)
-        }
-        _ => Err("Unsupported SQL command".to_string()),
+
+            let table_with_joins = tables.into_iter().next().unwrap();
+            parse_delete(table_with_joins, selection)
+        }*/
+
+
+            _ => Err("Unsupported SQL command".to_string()),
     }
 }
 
@@ -201,13 +204,23 @@ fn parse_update(
         where_clause,
     })
 }
+/* 
+fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Result<SqlAst, String> {
+    let table_name = match table_with_joins.relation {
+        TableFactor::Table { name, .. } => {
+            match &name.0[..] {
+                [ident] => ident.value.clone(),
+                [schema, table] => format!("{}.{}", schema.value, table.value),
+                _ => return Err("Invalid table name format".into()),
+            }
+        }
+        _ => return Err("DELETE only supports simple table targets".into()),
+    };
 
-fn parse_delete(table_name: String, selection: Option<Expr>) -> Result<SqlAst, String> {
-    let table = table_name;
-    let where_clause = selection.map(|expr| expr.to_string());
-    
     Ok(SqlAst::Delete {
-        table,
-        where_clause,
+        table: table_name,
+        where_clause: selection.map(|e| e.to_string()),
     })
-}
+}*/
+
+
