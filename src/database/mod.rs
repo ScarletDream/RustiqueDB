@@ -295,14 +295,14 @@ impl Database {
         table_name: &str,
         columns: Vec<&str>,
         condition: Option<&str>,
-        order_by: Option<Vec<(&str, bool)>>  // 多列排序
+        order_by: Option<Vec<(&str, bool)>>  // (列名, 是否降序)
     ) -> Result<Vec<Vec<String>>, String> {
         let table = self.tables
             .iter()
             .find(|t| t.name == table_name)
             .ok_or("Table not found")?;
 
-        // 获取列索引
+        // 获取结果列索引
         let column_indices: Vec<usize> = if columns == ["*"] {
             (0..table.columns.len()).collect()
         } else {
@@ -319,47 +319,35 @@ impl Database {
             Box::new(|_| true) // 将闭包装箱
         };
 
-        // 获取排序索引和方向
-        let sort_specs: Vec<(usize, &DataType, bool)> = if let Some(cols) = order_by {
-            cols.into_iter().map(|(col, desc)| {
-                let table_col_idx = table.columns.iter().position(|c| c.name == col)
-                    .ok_or(format!("Sort column '{}' not found", col))?;
-                let result_col_idx = column_indices.iter().position(|&i| i == table_col_idx)
-                    .ok_or(format!("Sort column '{}' not in selected columns", col))?;
-                Ok((result_col_idx, &table.columns[table_col_idx].data_type, desc))
-            }).collect::<Result<_, String>>()?
-        } else {
-            Vec::new()
-        };
-
-        // 过滤并映射结果
-        let mut result: Vec<Vec<String>> = table.data
+        // 收集原始行数据（带原始行索引）
+        let mut rows_with_indices: Vec<(usize, &Vec<String>)> = table.data
             .iter()
-            .filter(|row| filter_fn(row))
-            .map(|row| {
-                column_indices.iter().map(|&i| row[i].clone()).collect()
-            })
+            .enumerate()
+            .filter(|(_, row)| filter_fn(row))
             .collect();
 
-        // 执行排序
-        if !sort_specs.is_empty() {
-            result.sort_by(|a, b| {
-                for (idx, data_type, desc) in &sort_specs {
+        // 处理排序（如果需要）
+        if let Some(cols) = order_by {
+            // 获取排序列元数据
+            let sort_specs: Vec<(usize, &DataType, bool)> = cols.into_iter().map(|(col, desc)| {
+                let col_idx = table.columns.iter()
+                    .position(|c| c.name == col)
+                    .ok_or(format!("Sort column '{}' not found", col))?;
+                Ok((col_idx, &table.columns[col_idx].data_type, desc))
+            }).collect::<Result<_, String>>()?;
+
+            // 排序逻辑（使用原始数据）
+            rows_with_indices.sort_by(|(a_idx, _), (b_idx, _)| {
+                let a_row = &table.data[*a_idx];
+                let b_row = &table.data[*b_idx];
+
+                for (col_idx, data_type, desc) in &sort_specs {
                     let ordering = match data_type {
                         DataType::Int(_) => {
-                            let a_val = a[*idx].parse::<i32>();
-                            let b_val = b[*idx].parse::<i32>();
-                            match (a_val, b_val) {
-                                (Ok(a), Ok(b)) => a.cmp(&b),
-                                (Err(_), _) => std::cmp::Ordering::Greater,
-                                (_, Err(_)) => std::cmp::Ordering::Less,
-                            }
+                            a_row[*col_idx].parse::<i32>().unwrap_or(0)
+                                .cmp(&b_row[*col_idx].parse::<i32>().unwrap_or(0))
                         },
-                        DataType::Varchar(_) => {
-                            if a[*idx].is_empty() { std::cmp::Ordering::Greater }
-                            else if b[*idx].is_empty() { std::cmp::Ordering::Less }
-                            else { a[*idx].cmp(&b[*idx]) }
-                        },
+                        DataType::Varchar(_) => a_row[*col_idx].cmp(&b_row[*col_idx]),
                     };
 
                     if *desc {
@@ -372,6 +360,13 @@ impl Database {
             });
         }
 
+        // 构建最终结果
+        let result = rows_with_indices.into_iter()
+            .map(|(_, row)| {
+                column_indices.iter().map(|&i| row[i].clone()).collect()
+            })
+            .collect();
+
         Ok(result)
     }
 
@@ -381,11 +376,10 @@ impl Database {
         table: &'a Table,
     ) -> Result<Box<dyn Fn(&[String]) -> bool + 'a>, String> {
         let parts: Vec<&str> = cond.split_whitespace().collect();
-        if parts.len() != 3 && !(parts.len() == 4 && parts[1] == "IS" && parts[3] == "NULL") {
+        if parts.len() != 3 && !(parts.len() == 4 && parts[1] == "IS" && (parts[3] == "NULL" || parts[3] == "NOT NULL")) {
             return Err("Invalid WHERE format".into());
         }
 
-        // 处理 "IS NULL" 和 "IS NOT NULL"
         let (col, op, val) = if parts.len() == 4 {
             (parts[0], parts[1], parts[2..].join(" "))
         } else {
@@ -399,8 +393,21 @@ impl Database {
             ">" => Box::new(move |row| row[col_idx].parse::<i32>().ok().unwrap_or(0) > val.parse::<i32>().unwrap_or(0)),
             "<" => Box::new(move |row| row[col_idx].parse::<i32>().ok().unwrap_or(0) < val.parse::<i32>().unwrap_or(0)),
             "=" => Box::new(move |row| row[col_idx] == val),
-            "IS" if val == "NULL" => Box::new(move |row| row[col_idx].is_empty()),
-            "IS" if val == "NOT NULL" => Box::new(move |row| !row[col_idx].is_empty()),
+            "IS" => {
+                if val == "NULL" {
+                    Box::new(move |row| {
+                        let val = &row[col_idx];
+                        val.is_empty() || val.eq_ignore_ascii_case("NULL")
+                    })
+                } else if val == "NOT NULL" {
+                    Box::new(move |row| {
+                        let val = &row[col_idx];
+                        !val.is_empty() && !val.eq_ignore_ascii_case("NULL")
+                    })
+                } else {
+                    return Err(format!("Unsupported IS condition: {}", val));
+                }
+            },
             _ => return Err(format!("Unsupported operator: {}", op)),
         })
     }

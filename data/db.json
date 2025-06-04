@@ -1,7 +1,7 @@
 {
   "tables": [
     {
-      "name": "students",
+      "name": "users",
       "columns": [
         {
           "name": "id",
@@ -14,13 +14,192 @@
         {
           "name": "name",
           "data_type": {
-            "Varchar": 20
+            "Varchar": 255
           },
           "is_primary": false,
           "not_null": true
         },
         {
-          "name": "score",
+          "name": "email",
+          "data_type": {
+            "Varchar": 255
+          },
+          "is_primary": false,
+          "not_null": false
+        }
+      ],
+      "data": [
+        [
+          "2",
+          "'Bobby'",
+          "'bobby@domain.com'"
+        ]
+      ]
+    },
+    {
+      "name": "users",
+      "columns": [
+        {
+          "name": "user_id",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": true,
+          "not_null": false
+        },
+        {
+          "name": "username",
+          "data_type": {
+            "Varchar": 50
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "password",
+          "data_type": {
+            "Varchar": 100
+          },
+          "is_primary": false,
+          "not_null": false
+        }
+      ],
+      "data": []
+    },
+    {
+      "name": "students",
+      "columns": [
+        {
+          "name": "id",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": true,
+          "not_null": false
+        },
+        {
+          "name": "name",
+          "data_type": {
+            "Varchar": 255
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "email",
+          "data_type": {
+            "Varchar": 255
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "age",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": false,
+          "not_null": false
+        }
+      ],
+      "data": [
+        [
+          "1",
+          "'Alice'",
+          "'alice@school.edu'",
+          "20"
+        ],
+        [
+          "2",
+          "'Bob'",
+          "'bob@school.edu'",
+          "22"
+        ],
+        [
+          "3",
+          "'Charlie'",
+          "NULL",
+          "19"
+        ],
+        [
+          "4",
+          "'David'",
+          "'david@school.edu'",
+          "21"
+        ],
+        [
+          "5",
+          "'Eve'",
+          "'eve@school.edu'",
+          "23"
+        ],
+        [
+          "6",
+          "'Jean-Luc Picard'",
+          "'captain@starfleet.edu'",
+          "57"
+        ],
+        [
+          "7",
+          "'Emma'",
+          "'emma.twin@school.edu'",
+          "18"
+        ],
+        [
+          "8",
+          "'Liam'",
+          "'liam.twin@school.edu'",
+          "18"
+        ],
+        [
+          "9",
+          "'María José'",
+          "'mj@school.edu'",
+          "20"
+        ],
+        [
+          "10",
+          "'Professor Oak'",
+          "'oak@pokemon.edu'",
+          "72"
+        ],
+        [
+          "11",
+          "'KO'",
+          "'NULL'",
+          "2500"
+        ]
+      ]
+    },
+    {
+      "name": "students",
+      "columns": [
+        {
+          "name": "id",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "name",
+          "data_type": {
+            "Varchar": 255
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "email",
+          "data_type": {
+            "Varchar": 255
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "age",
           "data_type": {
             "Int": 10
           },
