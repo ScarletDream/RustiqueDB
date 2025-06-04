@@ -3,6 +3,44 @@ use rustique_db::database::{Database, DataType};
 use rustique_db::format::format_table_from_db;
 use rustique_db::parser::{parse_sql, SqlAst};
 
+// 注释处理
+fn remove_comments(input: &str) -> &str {
+    let mut in_block_comment = false;
+    let mut in_line_comment = false;
+    let mut last_valid_pos = 0;
+    let bytes = input.as_bytes();
+
+    for (i, &b) in bytes.iter().enumerate() {
+        match (b, in_block_comment, in_line_comment) {
+            // 检测块注释开始
+            (b'/', _, false) if i+1 < bytes.len() && bytes[i+1] == b'*' => {
+                in_block_comment = true;
+            },
+            // 检测块注释结束
+            (b'*', true, _) if i+1 < bytes.len() && bytes[i+1] == b'/' => {
+                in_block_comment = false;
+            },
+            // 检测行注释开始
+            (b'-', false, false) if i+1 < bytes.len() && bytes[i+1] == b'-' => {
+                in_line_comment = true;
+            },
+            // 处理换行符（行注释结束）
+            (b'\n', _, true) => {
+                in_line_comment = false;
+                last_valid_pos = i + 1; // 保留换行符保证行号正确
+            },
+            // 有效字符处理
+            (_, false, false) => {
+                last_valid_pos = i + 1;
+            },
+            _ => {}
+        }
+    }
+
+    // 返回原始输入的切片引用（零拷贝）
+    &input[..last_valid_pos]
+}
+
 fn main() {
     // 加载或创建数据库
     let mut db = Database::load().unwrap_or_else(|_| {
@@ -62,8 +100,12 @@ fn main() {
             }
         }
 
-        // 移除结尾的分号
-        let sql_input = input.trim_end().trim_end_matches(';').trim();
+        // 移除
+        let sql_input = remove_comments(&input)
+            .trim()
+            .trim_end_matches(';')
+            .trim();
+
         if sql_input.is_empty() {
             continue;
         }
@@ -116,8 +158,6 @@ fn main() {
                     SqlAst::Update { table, set, where_clause } => {
                         let cond_str = where_clause.as_deref();
                         let set_ref = set;  // 直接使用 Vec<(String, String)>
-
-
                         
                         match db.update(&table, set_ref, cond_str) {
                             Ok(count) => {

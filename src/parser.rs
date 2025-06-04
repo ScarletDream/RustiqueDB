@@ -206,7 +206,6 @@ fn parse_update(
     })
 }
 
-
 fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Result<SqlAst, String> {
     let table_name = match table_with_joins.relation {
         TableFactor::Table { name, .. } => {
@@ -224,6 +223,3 @@ fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Re
         where_clause: selection.map(|e| e.to_string()),
     })
 }
-
-
-
