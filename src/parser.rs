@@ -33,6 +33,7 @@ pub enum SqlAst {
 
 pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
     let dialect = GenericDialect {};
+    //println!("Using dialect: {}", std::any::type_name::<PostgreSqlDialect>());
     let mut parser = Parser::new(&dialect);
     let ast = parser
         .try_with_sql(input)
@@ -40,6 +41,8 @@ pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
         .parse_statement()
         .map_err(|e| e.to_string())?;
 
+    //用于查看语法树的结构
+    //println!("{:#?}", ast);
     match ast {
         Statement::Query(query) => parse_select(&query),
         Statement::CreateTable { name, columns, constraints, .. } => {
@@ -49,17 +52,15 @@ pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
         Statement::Update { table, assignments, selection, .. } => {
             parse_update(table, assignments, selection)
         }
-        /*Statement::Delete { tables, selection, .. } => {
-            if tables.len() != 1 {
+        Statement::Delete { from, selection, .. } => {
+            if from.len() != 1 {
                 return Err("DELETE statement only supports single table".into());
             }
 
-            let table_with_joins = tables.into_iter().next().unwrap();
+            let table_with_joins = from.into_iter().next().unwrap();
             parse_delete(table_with_joins, selection)
-        }*/
-
-
-            _ => Err("Unsupported SQL command".to_string()),
+        }
+        _ => Err("Unsupported SQL command".to_string()),
     }
 }
 
@@ -204,7 +205,8 @@ fn parse_update(
         where_clause,
     })
 }
-/* 
+
+
 fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Result<SqlAst, String> {
     let table_name = match table_with_joins.relation {
         TableFactor::Table { name, .. } => {
@@ -221,6 +223,7 @@ fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Re
         table: table_name,
         where_clause: selection.map(|e| e.to_string()),
     })
-}*/
+}
+
 
 
