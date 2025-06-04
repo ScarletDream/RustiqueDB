@@ -143,22 +143,23 @@ fn main() {
                         }
                     }
                     SqlAst::Insert { table, values } => {
-                        // 转换为引用数组
                         let values_ref: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
                         
-                        // 正确调用 insert（不处理返回值）
-                        db.insert(&table, values_ref);
-                        println!("1 row inserted");
-                        
-                        // 保存数据库
-                        if let Err(e) = db.save() {
-                            eprintln!("Failed to save database: {}", e);
+                        match db.insert(&table, values_ref) {
+                            Ok(count) => {
+                                println!("{} row(s) inserted", count);
+                                if let Err(e) = db.save() {
+                                    eprintln!("Failed to save database: {}", e);
+                                }
+                            }
+                            Err(e) => eprintln!("Insert error: {}", e),
                         }
                     }
+
                     SqlAst::Update { table, set, where_clause } => {
                         let cond_str = where_clause.as_deref();
                         let set_ref = set;  // 直接使用 Vec<(String, String)>
-                        
+
                         match db.update(&table, set_ref, cond_str) {
                             Ok(count) => {
                                 println!("{} row(s) updated", count);
@@ -184,6 +185,20 @@ fn main() {
                             Err(e) => eprintln!("Delete error: {}", e),
                         }
                     }
+                    SqlAst::Drop { table_name, if_exists } => {
+                        match db.drop_table(&table_name, if_exists) {
+                            Ok(()) => {
+                                println!("Table '{}' dropped successfully", table_name);
+                                // 保存数据库（与其他写操作一致）
+                                if let Err(e) = db.save() {
+                                    eprintln!("Failed to save database: {}", e);
+                                    //return Err(e);
+                                }
+                                //Ok(())
+                            }
+                            Err(e) => eprintln!("Drop error: {}", e),
+                        }
+                    }          
                 }
             }
             Err(e) => eprintln!("Parse error: {}", e),

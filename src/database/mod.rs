@@ -56,51 +56,67 @@ impl Database {
     }
 
     // 数据插入方法
-    pub fn insert(&mut self, table_name: &str, values: Vec<&str>) -> Result<(), String> {
-
+    pub fn insert(&mut self, table_name: &str, values: Vec<&str>) -> Result<usize, String> {
         let table = self.tables.iter_mut()
             .find(|t| t.name == table_name)
             .ok_or("Table not found")?;
 
-        // 列数检查
-        if values.len() != table.columns.len() {
-            return Err("Column count mismatch".into());
+        // 检查总行数是否匹配列数
+        if values.len() % table.columns.len() != 0 {
+            return Err(format!(
+                "Values count {} doesn't match column count {}",
+                values.len(),
+                table.columns.len()
+            ));
         }
 
-        // 非空约束检查
-        for (value, column) in values.iter().zip(&table.columns) {
-            if column.not_null && value.is_empty() {
-                return Err(format!("Field '{}' doesn't have a default value", column.name));
+        let row_count = values.len() / table.columns.len();
+        let mut inserted = 0;
+
+        for chunk in values.chunks(table.columns.len()) {
+            // 列数检查
+            if chunk.len() != table.columns.len() {
+                return Err("Column count mismatch".into());
             }
+
+            // 非空约束检查
+            for (value, column) in chunk.iter().zip(&table.columns) {
+                if column.not_null && value.is_empty() {
+                    return Err(format!("Field '{}' doesn't have a default value", column.name));
+                }
+            }
+
+            // 类型检查
+            for (i, (value, column)) in chunk.iter().zip(&table.columns).enumerate() {
+                if value.trim().is_empty() {
+                    continue;
+                }
+                match (&column.data_type, *value) {
+                    (DataType::Int(_), v) if v.parse::<i32>().is_err() => {
+                        return Err(format!("Value '{}' is not INT for column '{}'", v, column.name));
+                    },
+                    (DataType::Varchar(max_len), v) if v.len() > *max_len as usize => {
+                        return Err(format!("Value too long for column '{}' (max {})", column.name, max_len));
+                    },
+                    _ => {}
+                }
+            }
+
+            // 主键唯一性检查
+            if let Some(pk_index) = table.columns.iter().position(|c| c.is_primary) {
+                let pk_value = chunk[pk_index];
+                if table.data.iter().any(|row| row[pk_index] == pk_value) {
+                    return Err(format!("Duplicate entry '{}' for key 'PRIMARY'", pk_value));
+                }
+            }
+
+            table.data.push(chunk.iter().map(|s| s.to_string()).collect());
+            inserted += 1;
         }
 
-        // 类型检查
-        for (i, (value, column)) in values.iter().zip(&table.columns).enumerate() {
-            if value.trim().is_empty() {
-                continue; // 跳过空值检查
-            }
-            match (&column.data_type, *value) {
-                (DataType::Int(_), v) if v.parse::<i32>().is_err() => {
-                    return Err(format!("Value '{}' is not INT for column '{}'", v, column.name));
-                },
-                (DataType::Varchar(max_len), v) if v.len() > *max_len as usize => {
-                    return Err(format!("Value too long for column '{}' (max {})", column.name, max_len));
-                },
-                _ => {} // 类型正确
-            }
-        }
-
-        // 主键唯一性检查
-        if let Some(pk_index) = table.columns.iter().position(|c| c.is_primary) {
-            let pk_value = values[pk_index];
-            if table.data.iter().any(|row| row[pk_index] == pk_value) {
-                return Err(format!("Error: Duplicate entry '{}' for key 'PRIMARY'", pk_value));
-            }
-        }
-
-        table.data.push(values.iter().map(|s| s.to_string()).collect());
-        Ok(())
+        Ok(inserted)
     }
+
 
     pub fn update(
         &mut self,
@@ -204,6 +220,16 @@ impl Database {
         // 2. 提前复制所需的列信息
         let columns = table.columns.clone();
 
+    pub fn delete(&mut self,table_name: &str,condition: Option<&str>,) -> Result<usize, String> {
+        // 1. 获取表的可变引用
+        let table = self.tables
+            .iter_mut()
+            .find(|t| t.name == table_name)
+            .ok_or(format!("Table '{}' not found", table_name))?;
+
+        // 2. 提前复制所需的列信息
+        let columns = table.columns.clone();
+
         // 3. 创建过滤闭包
         let filter_fn: Box<dyn Fn(&[String]) -> bool> = if let Some(cond) = condition {
             // 使用提前复制的列信息
@@ -250,6 +276,24 @@ impl Database {
         // 读取并反序列化
         let json = fs::read_to_string("data/db.json").map_err(|e| e.to_string())?;
         serde_json::from_str(&json).map_err(|e| e.to_string())
+    }
+
+    pub fn drop_table(&mut self, table_name: &str, if_exists: bool) -> Result<(), String> {
+        let pos = self.tables.iter().position(|t| t.name == table_name);
+        
+        match pos {
+            Some(index) => {
+                self.tables.remove(index);
+                Ok(())
+            }
+            None => {
+                if if_exists {
+                    Ok(())
+                } else {
+                    Err(format!("Table '{}' doesn't exist", table_name))
+                }
+            }
+        }
     }
 
     pub fn select(
