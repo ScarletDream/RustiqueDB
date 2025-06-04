@@ -114,10 +114,35 @@ fn main() {
                         }
                     }
                     SqlAst::Update { table, set, where_clause } => {
-                        eprintln!("UPDATE not implemented yet");
+                        let cond_str = where_clause.as_deref();
+                        let set_ref = set;  // 直接使用 Vec<(String, String)>
+
+
+                        
+                        match db.update(&table, set_ref, cond_str) {
+                            Ok(count) => {
+                                println!("{} row(s) updated", count);
+                                // 保存数据库
+                                if let Err(e) = db.save() {
+                                    eprintln!("Failed to save database: {}", e);
+                                }
+                            }
+                            Err(e) => eprintln!("Update error: {}", e),
+                        }
                     }
                     SqlAst::Delete { table, where_clause } => {
-                        eprintln!("DELETE not implemented yet");
+                        let cond_str = where_clause.as_deref();
+                        
+                        match db.delete(&table, cond_str) {
+                            Ok(count) => {
+                                println!("{} row(s) deleted", count);
+                                // 保存数据库
+                                if let Err(e) = db.save() {
+                                    eprintln!("Failed to save database: {}", e);
+                                }
+                            }
+                            Err(e) => eprintln!("Delete error: {}", e),
+                        }
                     }
                 }
             }

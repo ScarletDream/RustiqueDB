@@ -21,7 +21,7 @@ pub enum DataType {
     Varchar(u32),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize,Clone)]
 pub struct Column {
     pub name: String,
     pub data_type: DataType,
@@ -57,6 +57,7 @@ impl Database {
 
     // 数据插入方法
     pub fn insert(&mut self, table_name: &str, values: Vec<&str>) -> Result<(), String> {
+
         let table = self.tables.iter_mut()
             .find(|t| t.name == table_name)
             .ok_or("Table not found")?;
@@ -100,6 +101,142 @@ impl Database {
         table.data.push(values.iter().map(|s| s.to_string()).collect());
         Ok(())
     }
+
+    pub fn update(
+        &mut self,
+        table_name: &str,
+        set: Vec<(String, String)>,  // 已修改为 String
+        condition: Option<&str>,
+    ) -> Result<usize, String> {
+        // 1. 获取表的可变引用
+        let table = self.tables
+            .iter_mut()
+            .find(|t| t.name == table_name)
+            .ok_or(format!("Table '{}' not found", table_name))?;
+
+        // 2. 提前收集所有需要的列信息 (无需修改)
+        let column_names: Vec<String> = table.columns.iter().map(|c| c.name.clone()).collect();
+        let column_types: Vec<DataType> = table.columns.iter().map(|c| c.data_type.clone()).collect();
+        let not_null_flags: Vec<bool> = table.columns.iter().map(|c| c.not_null).collect();
+        let is_primary_flags: Vec<bool> = table.columns.iter().map(|c| c.is_primary).collect();
+
+        // 3. 创建列名到索引的映射 (修改为使用 String)
+        let column_map: std::collections::HashMap<String, usize> = column_names
+            .iter()
+            .enumerate()
+            .map(|(idx, name)| (name.clone(), idx))
+            .collect();
+
+        // 4. 检查主键唯一性 (修改为使用 String)
+        for (col_name, new_value) in &set {
+            if let Some(idx) = column_map.get(col_name) {
+                if is_primary_flags[*idx] {
+                    if table.data.iter().any(|row| &row[*idx] == new_value) {
+                        return Err(format!("Duplicate entry '{}' for key 'PRIMARY'", new_value));
+                    }
+                }
+            }
+        }
+
+        // 5. 过滤函数 (无需修改)
+        let filter_fn: Box<dyn Fn(&[String]) -> bool> = if let Some(cond) = condition {
+            let columns = table.columns.clone();
+            Box::new(move |row: &[String]| {
+                let temp_table = Table {
+                    name: String::new(),
+                    columns: columns.clone(),
+                    data: vec![],
+                };
+                match Self::parse_condition(cond, &temp_table) {
+                    Ok(filter) => filter(row),
+                    Err(_) => false,
+                }
+            })
+        } else {
+            Box::new(|_| true)
+        };
+
+        // 6. 执行更新 (修改为使用 String)
+        let mut affected_rows = 0;
+        for row in &mut table.data {
+            if filter_fn(row) {
+                affected_rows += 1;
+                for (col_name, new_value) in &set {
+                    if let Some(idx) = column_map.get(col_name) {
+                        // 类型检查
+                        match &column_types[*idx] {
+                            DataType::Int(_) if new_value.parse::<i32>().is_err() => {
+                                return Err(format!("Value '{}' is not INT for column '{}'", 
+                                    new_value, col_name));
+                            },
+                            DataType::Varchar(max_len) if new_value.len() > *max_len as usize => {
+                                return Err(format!("Value too long for column '{}' (max {})", 
+                                    col_name, max_len));
+                            },
+                            _ => {}
+                        }
+
+                        // 非空检查
+                        if not_null_flags[*idx] && new_value.is_empty() {
+                            return Err(format!("Column '{}' cannot be null", col_name));
+                        }
+
+                        row[*idx] = new_value.clone();
+                    }
+                }
+            }
+        }
+
+        Ok(affected_rows)
+    }
+
+
+
+pub fn delete(
+    &mut self,
+    table_name: &str,
+    condition: Option<&str>,
+) -> Result<usize, String> {
+    // 1. 获取表的可变引用
+    let table = self.tables
+        .iter_mut()
+        .find(|t| t.name == table_name)
+        .ok_or(format!("Table '{}' not found", table_name))?;
+
+    // 2. 提前复制所需的列信息
+    let columns = table.columns.clone();
+
+    // 3. 创建过滤闭包
+    let filter_fn: Box<dyn Fn(&[String]) -> bool> = if let Some(cond) = condition {
+        // 使用提前复制的列信息
+        Box::new(move |row: &[String]| {
+            let local_table = Table {
+                name: String::new(),
+                columns: columns.clone(),
+                data: vec![],
+            };
+            match Self::parse_condition(cond, &local_table) {
+                Ok(filter) => filter(row),
+                Err(_) => false, // 解析失败时不匹配任何行
+            }
+        })
+    } else {
+        Box::new(|_| true) // 无条件时匹配所有行
+    };
+
+    // 4. 执行删除操作
+    let original_len = table.data.len();
+    table.data.retain(|row| !filter_fn(row));
+    let affected_rows = original_len - table.data.len();
+
+    Ok(affected_rows)
+}
+
+
+    
+
+
+
 
     pub fn save(&self) -> Result<(), String> {
         // 创建data目录（如果不存在）
