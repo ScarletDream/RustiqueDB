@@ -18,7 +18,7 @@ pub enum SqlAst {
     },
     Insert {
         table: String,
-        values: Vec<String>,
+        values: Vec<Vec<String>>,  // 修改为支持多行
     },
     Update {
         table: String,
@@ -114,40 +114,68 @@ fn parse_create_table(
     constraints: Vec<TableConstraint>,
 ) -> Result<SqlAst, String> {
     let table_name = name.to_string();
-    
-    let primary_keys: Vec<&str> = constraints
-        .iter()
-        .filter_map(|c| match c {
-            TableConstraint::Unique {
-                is_primary: true,
-                columns,
-                ..
-            } => Some(columns.iter().map(|c| c.value.as_str()).collect::<Vec<_>>()),
-            _ => None,
-        })
-        .flatten()
-        .collect();
+    //println!("[DEBUG] 开始解析创建表: {}", table_name);
 
+    // 1. 收集所有主键列名（从列级约束和表级约束）
+    let mut primary_keys = Vec::new();
+
+    // 1.1 先处理列级主键约束
+    for col in &columns {
+        for option in &col.options {
+            if let ColumnOption::Unique { is_primary: true } = option.option {
+                //println!("[DEBUG] 发现列级主键约束: {}", col.name.value);
+                primary_keys.push(col.name.value.clone());
+            }
+        }
+    }
+
+    // 1.2 再处理表级主键约束（如果有）
+    for constraint in &constraints {
+        if let TableConstraint::Unique {
+            is_primary: true,
+            columns,
+            ..
+        } = constraint {
+            //println!("[DEBUG] 发现表级主键约束: {:?}", columns);
+            primary_keys.extend(columns.iter().map(|c| c.value.clone()));
+        }
+    }
+
+    //println!("[DEBUG] 最终主键列: {:?}", primary_keys);
+
+    // 2. 处理列定义
     let mut parsed_columns = Vec::new();
     for col in columns {
         let col_name = col.name.value;
         
-        // 关键修复：正确处理 CharacterLength 类型
+        // 检查是否是主键列
+        let is_primary = primary_keys.contains(&col_name);
+        
+        // 主键自动设置为NOT NULL（即使没有显式指定）
+        let mut not_null = is_primary;
+        
+        // 检查显式的NOT NULL约束
+        for option in &col.options {
+            match &option.option {
+                ColumnOption::NotNull => {
+                    not_null = true;
+                    //println!("[DEBUG] 列 '{}' 显式设置了 NOT NULL", col_name);
+                }
+                _ => {}
+            }
+        }
+
         let data_type = match &col.data_type {
             DataType::Int(_) => DbDataType::Int(10),
-            DataType::Varchar(Some(len_info)) => {
-                // 从 CharacterLength 结构体中提取 length 字段
-                DbDataType::Varchar(len_info.length as u32)
-            }
+            DataType::Varchar(Some(len_info)) => DbDataType::Varchar(len_info.length as u32),
             DataType::Varchar(None) => DbDataType::Varchar(255),
             _ => return Err(format!("Unsupported data type: {}", col.data_type)),
         };
         
-        let is_primary = primary_keys.contains(&col_name.as_str());
-        let not_null = col
-            .options
-            .iter()
-            .any(|opt| matches!(opt.option, ColumnOption::NotNull));
+        //println!(
+          //  "[DEBUG] 列处理完成: name={}, type={:?}, primary={}, not_null={}",
+          //  col_name, data_type, is_primary, not_null
+        //);
         
         parsed_columns.push((col_name, data_type, is_primary, not_null));
     }
@@ -158,25 +186,31 @@ fn parse_create_table(
     })
 }
 
+
+
 fn parse_insert(table_name: ObjectName, source: Box<Query>) -> Result<SqlAst, String> {
     let table = table_name.to_string();
     
-    let values = match source.body.as_ref() {
+    match *source.body {
         SetExpr::Values(values) => {
-            values.rows
-                .iter()
-                .flat_map(|row| {
+            let parsed_values = values.rows.iter()
+                .map(|row| {
                     row.iter()
                         .map(|expr| expr.to_string())
-                        .collect::<Vec<_>>()
+                        .collect()
                 })
-                .collect()
+                .collect();
+            
+            Ok(SqlAst::Insert {
+                table,
+                values: parsed_values,
+            })
         }
-        _ => return Err("Only VALUES clause is supported".into()),
-    };
-    
-    Ok(SqlAst::Insert { table, values })
+        _ => Err("Only VALUES clause is supported".into()),
+    }
 }
+
+
 
 
 fn parse_update(

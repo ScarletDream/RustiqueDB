@@ -29,4 +29,4 @@ coverage/
 # 忽略提交规则
 commitlint.config.js
 target/
-
+examples/

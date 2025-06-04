@@ -8,27 +8,19 @@
           "data_type": {
             "Int": 10
           },
-          "is_primary": false,
-          "not_null": false
+          "is_primary": true,
+          "not_null": true
         },
         {
           "name": "name",
           "data_type": {
-            "Varchar": 255
+            "Varchar": 20
           },
           "is_primary": false,
-          "not_null": false
+          "not_null": true
         },
         {
-          "name": "email",
-          "data_type": {
-            "Varchar": 255
-          },
-          "is_primary": false,
-          "not_null": false
-        },
-        {
-          "name": "age",
+          "name": "score",
           "data_type": {
             "Int": 10
           },
@@ -37,49 +29,6 @@
         }
       ],
       "data": []
-    },
-    {
-      "name": "test",
-      "columns": [
-        {
-          "name": "id",
-          "data_type": {
-            "Int": 10
-          },
-          "is_primary": false,
-          "not_null": false
-        },
-        {
-          "name": "name",
-          "data_type": {
-            "Varchar": 20
-          },
-          "is_primary": false,
-          "not_null": false
-        }
-      ],
-      "data": [
-        [
-          "1",
-          "'Alice'"
-        ],
-        [
-          "2",
-          "'Bob'"
-        ],
-        [
-          "3",
-          "'Charlie'"
-        ],
-        [
-          "1",
-          "'Dave'"
-        ],
-        [
-          "5",
-          "'Eve'"
-        ]
-      ]
     }
   ]
 }

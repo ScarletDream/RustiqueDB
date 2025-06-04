@@ -39,7 +39,15 @@ impl Database {
         &mut self,
         name: &str,
         columns: Vec<(&str, DataType, bool, bool)>, // (列名, 类型, 是否主键, 是否非空)
-    ) {
+    )-> Result<(), String>{
+
+        let normalized_name = name.trim().to_lowercase();
+        
+        // 原子化检查-创建操作
+        let exists = self.tables.iter().any(|t| t.name.to_lowercase() == normalized_name);
+        if exists {
+            return Err(format!("[REJECTED] Table '{}' exists", normalized_name)); // 确保此返回不可跳过
+        }
         self.tables.push(Table {
             name: name.to_string(),
             columns: columns
@@ -53,69 +61,65 @@ impl Database {
                 .collect(),
             data: Vec::new(),
         });
+        Ok(())
     }
 
     // 数据插入方法
-    pub fn insert(&mut self, table_name: &str, values: Vec<&str>) -> Result<usize, String> {
+    pub fn insert(
+        &mut self,
+        table_name: &str,
+        values: Vec<Vec<&str>>, // 改为接收多行数据
+    ) -> Result<usize, String> { // 返回插入的行数
         let table = self.tables.iter_mut()
             .find(|t| t.name == table_name)
             .ok_or("Table not found")?;
 
-        // 检查总行数是否匹配列数
-        if values.len() % table.columns.len() != 0 {
-            return Err(format!(
-                "Values count {} doesn't match column count {}",
-                values.len(),
-                table.columns.len()
-            ));
-        }
+        let mut inserted_rows = 0;
 
-        let row_count = values.len() / table.columns.len();
-        let mut inserted = 0;
-
-        for chunk in values.chunks(table.columns.len()) {
+        for row_values in values {
             // 列数检查
-            if chunk.len() != table.columns.len() {
+            if row_values.len() != table.columns.len() {
                 return Err("Column count mismatch".into());
             }
 
-            // 非空约束检查
-            for (value, column) in chunk.iter().zip(&table.columns) {
-                if column.not_null && value.is_empty() {
-                    return Err(format!("Field '{}' doesn't have a default value", column.name));
+            // 检查NOT NULL约束和主键
+            for (i, (value, column)) in row_values.iter().zip(&table.columns).enumerate() {
+                let is_null = value.trim().is_empty() || value.trim().eq_ignore_ascii_case("null");
+                
+                if column.not_null && is_null {
+                    return Err(format!("Column '{}' cannot be null", column.name));
                 }
-            }
-
-            // 类型检查
-            for (i, (value, column)) in chunk.iter().zip(&table.columns).enumerate() {
-                if value.trim().is_empty() {
-                    continue;
-                }
-                match (&column.data_type, *value) {
-                    (DataType::Int(_), v) if v.parse::<i32>().is_err() => {
-                        return Err(format!("Value '{}' is not INT for column '{}'", v, column.name));
-                    },
-                    (DataType::Varchar(max_len), v) if v.len() > *max_len as usize => {
-                        return Err(format!("Value too long for column '{}' (max {})", column.name, max_len));
-                    },
-                    _ => {}
+                
+                if column.is_primary && is_null {
+                    return Err(format!("Primary key '{}' cannot be null", column.name));
                 }
             }
 
             // 主键唯一性检查
             if let Some(pk_index) = table.columns.iter().position(|c| c.is_primary) {
-                let pk_value = chunk[pk_index];
-                if table.data.iter().any(|row| row[pk_index] == pk_value) {
-                    return Err(format!("Duplicate entry '{}' for key 'PRIMARY'", pk_value));
+                let pk_value = row_values[pk_index];
+                if !pk_value.trim().is_empty() && !pk_value.trim().eq_ignore_ascii_case("null") {
+                    if table.data.iter().any(|row| row[pk_index] == pk_value) {
+                        return Err(format!("Duplicate entry '{}' for key 'PRIMARY'", pk_value));
+                    }
                 }
             }
 
-            table.data.push(chunk.iter().map(|s| s.to_string()).collect());
-            inserted += 1;
+            let row: Vec<String> = row_values.iter().map(|s| {
+                if s.trim().eq_ignore_ascii_case("null") {
+                    String::new()
+                } else {
+                    s.to_string()
+                }
+            }).collect();
+            
+            table.data.push(row);
+            inserted_rows += 1;
         }
 
-        Ok(inserted)
+        Ok(inserted_rows)
     }
+
 
 
     pub fn update(
