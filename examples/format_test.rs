@@ -15,7 +15,7 @@ fn main() -> Result<(), String> {
     db.insert("users", vec!["3", "Charlie", "35"])?;
 
     // 执行查询并格式化输出
-    let data = db.select("users", vec!["name", "age"], None)?;
+    let data = db.select("users", vec!["name", "age"], None, None)?;
     let headers = vec!["Name".to_string(), "Age".to_string()]; // 注意转为String
 
     println!("{}", format::format_table(headers, data));

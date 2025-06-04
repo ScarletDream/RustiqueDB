@@ -9,8 +9,8 @@ RustiqueDB/
 │   ├── lib.rs          # 核心库模块
 │   ├── database/       # 数据库核心实现
 │   │   └── mod.rs      # 表/列/数据类型定义和操作
-│   ├── bin/            # 可执行文件
-│   │   └── rustique_db.rs # 主程序入口
+│   ├── main.rs         # 通过终端运行的入口
+│   ├── parser.rs       # SQL 解析逻辑
 │   ├── format.rs       # 表格格式化输出
 │   ├── error.rs        # 错误处理模块
 ├── data/               # JSON数据存储目录
