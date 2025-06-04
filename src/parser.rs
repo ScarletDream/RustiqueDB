@@ -163,21 +163,21 @@ fn parse_insert(table_name: ObjectName, source: Box<Query>) -> Result<SqlAst, St
     
     let values = match source.body.as_ref() {
         SetExpr::Values(values) => {
-            values
-                .rows
-                .first()
-                .map(|row| {
+            values.rows
+                .iter()
+                .flat_map(|row| {
                     row.iter()
                         .map(|expr| expr.to_string())
                         .collect::<Vec<_>>()
                 })
-                .unwrap_or_default()
+                .collect()
         }
         _ => return Err("Only VALUES clause is supported".into()),
     };
     
     Ok(SqlAst::Insert { table, values })
 }
+
 
 fn parse_update(
     table: TableWithJoins,

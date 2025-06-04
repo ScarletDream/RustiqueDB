@@ -37,6 +37,49 @@
         }
       ],
       "data": []
+    },
+    {
+      "name": "test",
+      "columns": [
+        {
+          "name": "id",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
+          "name": "name",
+          "data_type": {
+            "Varchar": 20
+          },
+          "is_primary": false,
+          "not_null": false
+        }
+      ],
+      "data": [
+        [
+          "1",
+          "'Alice'"
+        ],
+        [
+          "2",
+          "'Bob'"
+        ],
+        [
+          "3",
+          "'Charlie'"
+        ],
+        [
+          "1",
+          "'Dave'"
+        ],
+        [
+          "5",
+          "'Eve'"
+        ]
+      ]
     }
   ]
 }
