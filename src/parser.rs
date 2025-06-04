@@ -13,6 +13,10 @@ pub enum SqlAst {
         where_clause: Option<String>,
         order_by: Vec<(String, bool)>,
     },
+    Calculate {
+        expression: String,  // 原始表达式
+        result: f64          // 计算结果
+    },
     CreateTable {
         table_name: String,
         columns: Vec<(String, DbDataType, bool, bool)>,
@@ -36,45 +40,125 @@ pub enum SqlAst {
     },
 }
 
+const OPERATOR_PRECEDENCE: &[(char, u8)] = &[
+    ('*', 3),
+    ('/', 3),
+    ('+', 2),
+    ('-', 2),
+];
+
+fn get_precedence(op: char) -> u8 {
+    OPERATOR_PRECEDENCE.iter()
+        .find(|(c, _)| *c == op)
+        .map(|(_, p)| *p)
+        .unwrap_or(0)
+}
+
+// Token枚举
+#[derive(Debug)]
+enum Token {
+    Number(f64),
+    Operator(char),
+    LeftParen,
+    RightParen,
+}
+
+// 分词函数
+fn tokenize(expr: &str) -> Result<Vec<Token>, String> {
+    let mut tokens = Vec::new();
+    let mut num_buffer = String::new();
+
+    for c in expr.chars() {
+        match c {
+            '0'..='9' | '.' => num_buffer.push(c),
+            '+' | '-' | '*' | '/' | '(' | ')' => {
+                if !num_buffer.is_empty() {
+                    tokens.push(Token::Number(num_buffer.parse().map_err(|_| "Invalid number")?));
+                    num_buffer.clear();
+                }
+                match c {
+                    '(' => tokens.push(Token::LeftParen),
+                    ')' => tokens.push(Token::RightParen),
+                    op => tokens.push(Token::Operator(op)),
+                }
+            },
+            ' ' => continue,  // 忽略空格
+            _ => return Err(format!("Unknown character: {}", c)),
+        }
+    }
+
+    // 处理最后一个数字
+    if !num_buffer.is_empty() {
+        tokens.push(Token::Number(num_buffer.parse().map_err(|_| "Invalid number")?));
+    }
+
+    Ok(tokens)
+}
+
+// 运算符应用函数
+fn apply_operator(op: char, left: f64, right: f64) -> Result<f64, String> {
+    match op {
+        '+' => Ok(left + right),
+        '-' => Ok(left - right),
+        '*' => Ok(left * right),
+        '/' => {
+            if right == 0.0 {
+                Err("Division by zero".into())
+            } else {
+                Ok(left / right)
+            }
+        },
+        _ => Err(format!("Unknown operator: {}", op))
+    }
+}
+
 pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
     let dialect = GenericDialect {};
-    //println!("Using dialect: {}", std::any::type_name::<PostgreSqlDialect>());
     let mut parser = Parser::new(&dialect);
-    let ast = parser
-        .try_with_sql(input)
-        .map_err(|e| e.to_string())?
-        .parse_statement()
-        .map_err(|e| e.to_string())?;
 
-    //用于查看语法树的结构
-    //println!("{:#?}", ast);
-    match ast {
-        Statement::Query(query) => parse_select(&query),
-        Statement::CreateTable { name, columns, constraints, .. } => {
-            parse_create_table(name, columns, constraints)
-        }
-        Statement::Insert { table_name, source, .. } => parse_insert(table_name, source),
-        Statement::Update { table, assignments, selection, .. } => {
-            parse_update(table, assignments, selection)
-        }
-        Statement::Delete { from, selection, .. } => {
-            if from.len() != 1 {
-                return Err("DELETE statement only supports single table".into());
+    // 首先尝试解析为常规SQL语句
+    match parser.try_with_sql(input)
+        .map_err(|e| e.to_string())
+        .and_then(|mut p| p.parse_statement().map_err(|e| e.to_string()))
+    {
+        Ok(ast) => match ast {
+            Statement::Query(query) => parse_select(&query),
+            Statement::CreateTable { name, columns, constraints, .. } => {
+                parse_create_table(name, columns, constraints)
             }
-
-            let table_with_joins = from.into_iter().next().unwrap();
-            parse_delete(table_with_joins, selection)
-        }
-        Statement::Drop {object_type,if_exists,names,..} => {
-            parse_drop(object_type, if_exists, names)   
-        }  
-        _ => Err("Unsupported SQL command".to_string()),
+            Statement::Insert { table_name, source, .. } => parse_insert(table_name, source),
+            Statement::Update { table, assignments, selection, .. } => {
+                parse_update(table, assignments, selection)
+            }
+            Statement::Delete { from, selection, .. } => {
+                if from.len() != 1 {
+                    return Err("DELETE statement only supports single table".into());
+                }
+                let table_with_joins = from.into_iter().next().unwrap();
+                parse_delete(table_with_joins, selection)
+            }
+            Statement::Drop { object_type, if_exists, names, .. } => {
+                parse_drop(object_type, if_exists, names)
+            }
+            _ => parse_calculation(input.trim()) // 如果不是支持的SQL语句，尝试解析为计算表达式
+        },
+        Err(_) => parse_calculation(input.trim()) // 如果解析失败，尝试解析为计算表达式
     }
 }
 
 fn parse_select(query: &Query) -> Result<SqlAst, String> {
     match query.body.as_ref() {
         SetExpr::Select(select) => {
+            // 检查是否为无表查询（纯计算）
+            if select.from.is_empty() {
+                if select.projection.len() == 1 {
+                    if let SelectItem::UnnamedExpr(expr) = &select.projection[0] {
+                        return parse_calculation(&expr.to_string());
+                    }
+                }
+                return Err("Calculation expressions must have exactly one column".into());
+            }
+
             let table = select
                 .from
                 .first()
@@ -118,6 +202,92 @@ fn parse_select(query: &Query) -> Result<SqlAst, String> {
         }
         _ => Err("Unsupported query type".into()),
     }
+}
+
+// 计算表达式解析函数
+fn parse_calculation(input: &str) -> Result<SqlAst, String> {
+    // 支持带SELECT前缀或纯表达式
+    let expr = input.strip_prefix("SELECT ")
+        .unwrap_or(input)
+        .trim_end_matches(';')
+        .trim();
+
+    // 验证表达式有效性
+    if expr.is_empty() {
+        return Err("Empty expression".into());
+    }
+
+    // 检查括号匹配
+    let mut paren_stack = 0;
+    for c in expr.chars() {
+        match c {
+            '(' => paren_stack += 1,
+            ')' => {
+                if paren_stack == 0 {
+                    return Err("Unmatched closing parenthesis".into());
+                }
+                paren_stack -= 1;
+            },
+            _ => {}
+        }
+    }
+    if paren_stack != 0 {
+        return Err("Unmatched opening parenthesis".into());
+    }
+
+    let result = eval_expression(expr)?;
+    Ok(SqlAst::Calculate {
+        expression: expr.to_string(),
+        result
+    })
+}
+
+// 简单表达式求值（支持+-*/）
+fn eval_expression(expr: &str) -> Result<f64, String> {
+    let tokens = tokenize(expr)?;
+    let mut output = Vec::new();
+    let mut operators = Vec::new();
+
+    for token in tokens {
+        match token {
+            Token::Number(num) => output.push(num),
+            Token::Operator(op) => {
+                while let Some(top_op) = operators.last() {
+                    if *top_op == '(' {
+                        break;
+                    }
+                    if get_precedence(*top_op) >= get_precedence(op) {
+                        let op = operators.pop().unwrap();
+                        let (right, left) = (output.pop().ok_or("Missing operand")?,
+                                           output.pop().ok_or("Missing operand")?);
+                        output.push(apply_operator(op, left, right)?);
+                    } else {
+                        break;
+                    }
+                }
+                operators.push(op);
+            }
+            Token::LeftParen => operators.push('('),
+            Token::RightParen => {
+                while let Some(op) = operators.pop() {
+                    if op == '(' {
+                        break;
+                    }
+                    let (right, left) = (output.pop().ok_or("Missing operand")?,
+                                       output.pop().ok_or("Missing operand")?);
+                    output.push(apply_operator(op, left, right)?);
+                }
+            }
+        }
+    }
+
+    while let Some(op) = operators.pop() {
+        let (right, left) = (output.pop().ok_or("Missing operand")?,
+                           output.pop().ok_or("Missing operand")?);
+        output.push(apply_operator(op, left, right)?);
+    }
+
+    output.pop().ok_or("Invalid expression".into())
 }
 
 fn parse_create_table(

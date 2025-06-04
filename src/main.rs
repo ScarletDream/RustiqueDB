@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use rustique_db::database::{Database, DataType};
+use rustique_db::format::format_table;
 use rustique_db::format::format_table_from_db;
 use rustique_db::parser::{parse_sql, SqlAst};
 
@@ -131,6 +132,11 @@ fn main() {
                             }
                             Err(e) => eprintln!("Select error: {}", e),
                         }
+                    }
+                    SqlAst::Calculate { expression, result } => {
+                        let headers = vec![expression.clone()];
+                        let data = vec![vec![result.to_string()]];
+                        println!("{}", format_table(headers, data));
                     }
                     SqlAst::CreateTable { table_name, columns } => {
                         // 将列定义转换为数据库需要的格式
