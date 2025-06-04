@@ -206,19 +206,7 @@ impl Database {
         Ok(affected_rows)
     }
 
-    pub fn delete(
-        &mut self,
-        table_name: &str,
-        condition: Option<&str>,
-    ) -> Result<usize, String> {
-        // 1. 获取表的可变引用
-        let table = self.tables
-            .iter_mut()
-            .find(|t| t.name == table_name)
-            .ok_or(format!("Table '{}' not found", table_name))?;
 
-        // 2. 提前复制所需的列信息
-        let columns = table.columns.clone();
 
     pub fn delete(&mut self,table_name: &str,condition: Option<&str>,) -> Result<usize, String> {
         // 1. 获取表的可变引用
@@ -255,6 +243,8 @@ impl Database {
 
         Ok(affected_rows)
     }
+
+
 
     pub fn save(&self) -> Result<(), String> {
         // 创建data目录（如果不存在）
