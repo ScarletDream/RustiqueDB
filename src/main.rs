@@ -143,7 +143,10 @@ fn main() {
                         }
                     }
                     SqlAst::Insert { table, values } => {
-                        let values_ref: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+                        // 转换为 Vec<Vec<&str>> 供数据库处理
+                        let values_ref: Vec<Vec<&str>> = values.iter()
+                            .map(|row| row.iter().map(|s| s.as_str()).collect())
+                            .collect();
                         
                         match db.insert(&table, values_ref) {
                             Ok(count) => {
