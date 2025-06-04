@@ -213,7 +213,6 @@ fn parse_update(
     })
 }
 
-
 fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Result<SqlAst, String> {
     let table_name = match table_with_joins.relation {
         TableFactor::Table { name, .. } => {
@@ -253,6 +252,3 @@ fn parse_drop(
         if_exists,
     })
 }
-
-
-
