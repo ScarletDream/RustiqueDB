@@ -29,6 +29,10 @@ pub enum SqlAst {
         table: String,
         where_clause: Option<String>,
     },
+    Drop { 
+        table_name: String,
+        if_exists: bool,  // 是否包含 IF EXISTS 子句
+    },
 }
 
 pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
@@ -60,6 +64,9 @@ pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
             let table_with_joins = from.into_iter().next().unwrap();
             parse_delete(table_with_joins, selection)
         }
+        Statement::Drop {object_type,if_exists,names,..} => {
+            parse_drop(object_type, if_exists, names)   
+        }  
         _ => Err("Unsupported SQL command".to_string()),
     }
 }
@@ -222,6 +229,28 @@ fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Re
     Ok(SqlAst::Delete {
         table: table_name,
         where_clause: selection.map(|e| e.to_string()),
+    })
+}
+
+fn parse_drop(
+    object_type: ObjectType,
+    if_exists: bool,
+    names: Vec<ObjectName>,
+) -> Result<SqlAst, String> {
+    // 目前只支持 DROP TABLE
+    if object_type != ObjectType::Table {
+        return Err("Only DROP TABLE is supported".into());
+    }
+
+    if names.len() != 1 {
+        return Err("DROP TABLE only supports single table".into());
+    }
+
+    let table_name = names[0].to_string(); // 简化处理，实际可能需要处理带schema的情况
+
+    Ok(SqlAst::Drop { 
+        table_name,
+        if_exists,
     })
 }
 

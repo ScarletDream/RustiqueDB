@@ -192,49 +192,41 @@ impl Database {
 
 
 
-pub fn delete(
-    &mut self,
-    table_name: &str,
-    condition: Option<&str>,
-) -> Result<usize, String> {
-    // 1. 获取表的可变引用
-    let table = self.tables
-        .iter_mut()
-        .find(|t| t.name == table_name)
-        .ok_or(format!("Table '{}' not found", table_name))?;
+    pub fn delete(&mut self,table_name: &str,condition: Option<&str>,) -> Result<usize, String> {
+        // 1. 获取表的可变引用
+        let table = self.tables
+            .iter_mut()
+            .find(|t| t.name == table_name)
+            .ok_or(format!("Table '{}' not found", table_name))?;
 
-    // 2. 提前复制所需的列信息
-    let columns = table.columns.clone();
+        // 2. 提前复制所需的列信息
+        let columns = table.columns.clone();
 
-    // 3. 创建过滤闭包
-    let filter_fn: Box<dyn Fn(&[String]) -> bool> = if let Some(cond) = condition {
-        // 使用提前复制的列信息
-        Box::new(move |row: &[String]| {
-            let local_table = Table {
-                name: String::new(),
-                columns: columns.clone(),
-                data: vec![],
-            };
-            match Self::parse_condition(cond, &local_table) {
-                Ok(filter) => filter(row),
-                Err(_) => false, // 解析失败时不匹配任何行
-            }
-        })
-    } else {
-        Box::new(|_| true) // 无条件时匹配所有行
-    };
+        // 3. 创建过滤闭包
+        let filter_fn: Box<dyn Fn(&[String]) -> bool> = if let Some(cond) = condition {
+            // 使用提前复制的列信息
+            Box::new(move |row: &[String]| {
+                let local_table = Table {
+                    name: String::new(),
+                    columns: columns.clone(),
+                    data: vec![],
+                };
+                match Self::parse_condition(cond, &local_table) {
+                    Ok(filter) => filter(row),
+                    Err(_) => false, // 解析失败时不匹配任何行
+                }
+            })
+        } else {
+            Box::new(|_| true) // 无条件时匹配所有行
+        };
 
-    // 4. 执行删除操作
-    let original_len = table.data.len();
-    table.data.retain(|row| !filter_fn(row));
-    let affected_rows = original_len - table.data.len();
+        // 4. 执行删除操作
+        let original_len = table.data.len();
+        table.data.retain(|row| !filter_fn(row));
+        let affected_rows = original_len - table.data.len();
 
-    Ok(affected_rows)
-}
-
-
-    
-
+        Ok(affected_rows)
+    }
 
 
 
@@ -258,6 +250,24 @@ pub fn delete(
         // 读取并反序列化
         let json = fs::read_to_string("data/db.json").map_err(|e| e.to_string())?;
         serde_json::from_str(&json).map_err(|e| e.to_string())
+    }
+
+    pub fn drop_table(&mut self, table_name: &str, if_exists: bool) -> Result<(), String> {
+        let pos = self.tables.iter().position(|t| t.name == table_name);
+        
+        match pos {
+            Some(index) => {
+                self.tables.remove(index);
+                Ok(())
+            }
+            None => {
+                if if_exists {
+                    Ok(())
+                } else {
+                    Err(format!("Table '{}' doesn't exist", table_name))
+                }
+            }
+        }
     }
 
     pub fn select(
