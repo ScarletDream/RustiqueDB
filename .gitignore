@@ -30,8 +30,8 @@ coverage/
 commitlint.config.js
 target/
 
-公开测试用例/
+test/
 
 README.md
 
-~$Rust课程大作业选题-数据库-v2.pptx
+
