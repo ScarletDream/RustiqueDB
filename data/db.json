@@ -1,7 +1,7 @@
 {
   "tables": [
     {
-      "name": "books_test10",
+      "name": "books_test18",
       "columns": [
         {
           "name": "id",
@@ -20,24 +20,37 @@
           "not_null": false
         },
         {
+          "name": "left_num",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
           "name": "discription",
           "data_type": {
             "Varchar": 150
           },
           "is_primary": false,
           "not_null": false
+        },
+        {
+          "name": "price",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": false,
+          "not_null": true
         }
       ],
       "data": [
         [
           "1",
-          "Unsold",
-          "Search for ET"
-        ],
-        [
-          "2",
-          "Rust Programing2",
-          "Another book for rust development"
+          "SETI",
+          "",
+          "Search for ET",
+          "32"
         ]
       ]
     }

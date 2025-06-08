@@ -60,6 +60,9 @@ pub fn execute_sql(sql_statement: &str) -> bool {
     let statements_len = statements.len();
 
     for stmt in statements {
+        if has_error {
+            continue;
+        }
         match parse_sql(stmt) {
             Ok(ast) => {
                 match ast {
