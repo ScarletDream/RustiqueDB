@@ -1,5 +1,5 @@
 [package]
-name = "rustique_db"
+name = "simple_db"
 version = "0.1.0"
 edition = "2024"
 

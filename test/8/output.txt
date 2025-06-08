@@ -1,0 +1,7 @@
+| id  | title      | studio_id | genre_id | released |
+| --- | ---------- | --------- | -------- | -------- |
+| 2   | Siccccario | 2         | 2        | 2015     |
+
+| id  | title      | studio_id | genre_id | released |
+| --- | ---------- | --------- | -------- | -------- |
+| 1   | Staaaalker | 1         | 1        | 1979     |

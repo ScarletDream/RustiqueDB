@@ -1,0 +1,13 @@
+CREATE TABLE plants_test4 (
+    id INT(32) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT
+);
+
+INSERT INTO plants_test4 VALUES (1, "Tree", 25);
+INSERT INTO plants_test4 VALUES (2, "flower", 1);
+UPDATE plants_test4
+SET age = 2
+WHERE id = 2;
+
+SELECT name, age FROM plants_test4;

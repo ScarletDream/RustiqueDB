@@ -1,0 +1,12 @@
+CREATE TABLE books_test18 (
+    id INT(32) PRIMARY KEY,
+    name VARCHAR(100),
+    left_num INT(32),
+    discription VARCHAR(150),
+    price INT NOT NULL
+);
+
+INSERT INTO books_test18 (id, name, discription, price)VALUES (1, "SETI", "Search for ET", 32);
+INSERT INTO books_test18 (left_num, name, price) VALUES (23, "Rust Porgraming", 66);
+
+SELECT * FROM books_test18

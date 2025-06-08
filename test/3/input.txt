@@ -1,0 +1,14 @@
+CREATE TABLE plants (
+    id INT(32) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT(32)
+);
+
+-- 插入数据
+INSERT INTO plants VALUES (1, "Tree", 25);
+INSERT INTO plants VALUES (2, "flower", 1);
+
+/*
+查询表中年龄
+*/
+SELECT age FROM plants;

@@ -1,0 +1,12 @@
+-- 创建表
+CREATE TABLE genres (
+    id INT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL
+);
+
+-- 插入数据
+INSERT INTO genres VALUES (1, "Science Fiction");
+INSERT INTO genres VALUES (2, "Action");
+
+-- 查询表中的所有数据
+SELECT * FROM genres;

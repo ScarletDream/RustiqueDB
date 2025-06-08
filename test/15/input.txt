@@ -1,0 +1,13 @@
+CREATE TABLE books_test15 (
+    id INT(32) PRIMARY KEY,
+    name VARCHAR(100),
+    left_num INT(32),
+    discription VARCHAR(150),
+    price INT NOT NULL
+);
+
+INSERT INTO books_test15 (id, name, discription, price)VALUES (1, "SETI", "Search for ET", 32);
+INSERT INTO books_test15 (left_num, id, name, price) VALUES (23, 2, "Rust Porgraming", 66);
+
+-- 查询表中的所有数据
+SELECT id, name, discription FROM books_test15 where left_num IS NULL and price < 50
