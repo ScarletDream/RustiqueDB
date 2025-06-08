@@ -4,46 +4,61 @@ pub fn format_table(
     headers: Vec<String>,
     data: Vec<Vec<String>>,
 ) -> String {
-    // 计算每列最大宽度
-    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+    // 计算每列最大内容宽度（纯内容，不考虑空格）
+    let mut content_widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
 
     for row in &data {
         for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
+            content_widths[i] = content_widths[i].max(cell.trim().len());
         }
     }
 
-    // 生成分隔线
-    let separator: String = widths.iter()
-        .map(|&w| "-".repeat(w + 2))
-        .collect::<Vec<_>>()
-        .join("+");
-
-    // 构建表格
-    let mut result = Vec::new();
-
-    // 表头
-    let header_line: String = headers.iter().enumerate()
-        .map(|(i, h)| format!(" {:1$} ", h, widths[i]))
-        .collect::<Vec<_>>()
-        .join("|");
-
-    result.push(separator.clone());
-    result.push(header_line);
-    result.push(separator.clone());
-
-    // 数据行
-    for row in data {
-        let row_line: String = row.iter().enumerate()
-            .map(|(i, cell)| format!(" {:1$} ", cell, widths[i]))
-            .collect::<Vec<_>>()
-            .join("|");
-        result.push(row_line);
+    // 确保每列最小内容宽度为3
+    for width in &mut content_widths {
+        *width = (*width).max(3);
     }
 
-    result.push(separator);
+    // 构建表格各部分
+    let mut result = Vec::new();
+
+    // 表头行和数据行中的单元格格式（内容左右各1空格）
+    let format_cell = |content: &str, width: usize| {
+        format!(" {:<width$} ", content, width = width)
+    };
+
+    // 表头行
+    let header_line: String = headers.iter().enumerate()
+        .map(|(i, h)| format_cell(h, content_widths[i]))
+        .collect::<Vec<_>>()
+        .join("|");
+    let header_line = format!("|{}|", header_line);
+
+    // 分隔线（完全匹配数据行的格式）
+    let separator_line: String = content_widths.iter()
+        .map(|&w| "-".repeat(w))  // 分隔线长度等于内容宽度
+        .collect::<Vec<_>>()
+        .join(" | ");  // 所有分隔符两侧都加空格
+    let separator_line = format!("| {} |", separator_line); // 首尾也加空格
+
+    // 数据行
+    let data_lines: Vec<String> = data.iter()
+        .map(|row| {
+            row.iter().enumerate()
+                .map(|(i, cell)| format_cell(cell.trim(), content_widths[i]))
+                .collect::<Vec<_>>()
+                .join("|")
+        })
+        .map(|line| format!("|{}|", line))
+        .collect();
+
+    result.push(header_line);
+    result.push(separator_line);
+    result.extend(data_lines);
+    
     result.join("\n")
 }
+
+
 
 pub fn format_table_from_db(
     db: &Database,
@@ -58,10 +73,8 @@ pub fn format_table_from_db(
 
     // 获取列名作为表头
     let headers = if columns == ["*"] {
-        // 选择所有列
         table.columns.iter().map(|c| c.name.clone()).collect()
     } else {
-        // 选择指定列
         columns.iter().map(|&col_name| {
             table.columns.iter()
                 .find(|c| c.name == col_name)
