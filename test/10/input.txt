@@ -8,8 +8,6 @@ INSERT INTO books_test10 VALUES (1, "SETI", "Search for ET");
 INSERT INTO books_test10 VALUES (2, "Rust Porgraming", "A book for rust development");
 
 UPDATE books_test10 SET name="Unsold" where name="SETI";
-
-UPDATE books_test10 SET name="Unsld" WHERE discription="A book for rust development";
 DELETE FROM books_test10 WHERE discription="A book for rust development";
 INSERT INTO books_test10 VALUES (2, "Rust Programing2", "Another book for rust development");
 

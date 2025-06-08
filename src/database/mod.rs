@@ -146,7 +146,7 @@ impl Database {
     pub fn update(
         &mut self,
         table_name: &str,
-        set: Vec<(String, String)>,  // 已修改为 String
+        set: Vec<(String, String)>,
         condition: Option<&str>,
     ) -> Result<usize, String> {
         // 1. 获取表的可变引用
@@ -155,21 +155,38 @@ impl Database {
             .find(|t| t.name == table_name)
             .ok_or(format!("Table '{}' not found", table_name))?;
 
-        // 2. 提前收集所有需要的列信息 (无需修改)
+        // 2. 提前收集所有需要的列信息
         let column_names: Vec<String> = table.columns.iter().map(|c| c.name.clone()).collect();
         let column_types: Vec<DataType> = table.columns.iter().map(|c| c.data_type.clone()).collect();
         let not_null_flags: Vec<bool> = table.columns.iter().map(|c| c.not_null).collect();
         let is_primary_flags: Vec<bool> = table.columns.iter().map(|c| c.is_primary).collect();
 
-        // 3. 创建列名到索引的映射 (修改为使用 String)
+        // 3. 创建列名到索引的映射
         let column_map: std::collections::HashMap<String, usize> = column_names
             .iter()
             .enumerate()
             .map(|(idx, name)| (name.clone(), idx))
             .collect();
 
-        // 4. 检查主键唯一性 (修改为使用 String)
-        for (col_name, new_value) in &set {
+        // 4. 预处理set值，移除字符串值的引号
+        let processed_set: Vec<(String, String)> = set.into_iter()
+            .map(|(col_name, value)| {
+                // 统一处理值格式，与insert保持一致
+                let processed_value = if value.starts_with('"') && value.ends_with('"') {
+                    value.trim_matches('"').to_string()
+                } else if value.starts_with('\'') && value.ends_with('\'') {
+                    value.trim_matches('\'').to_string()
+                } else if value.eq_ignore_ascii_case("null") {
+                    String::new() // 存储为""表示NULL
+                } else {
+                    value
+                };
+                (col_name, processed_value)
+            })
+            .collect();
+
+        // 5. 检查主键唯一性
+        for (col_name, new_value) in &processed_set {
             if let Some(idx) = column_map.get(col_name) {
                 if is_primary_flags[*idx] {
                     if table.data.iter().any(|row| &row[*idx] == new_value) {
@@ -179,7 +196,7 @@ impl Database {
             }
         }
 
-        // 5. 过滤函数 (无需修改)
+        // 6. 创建过滤闭包
         let filter_fn: Box<dyn Fn(&[String]) -> bool> = if let Some(cond) = condition {
             let columns = table.columns.clone();
             Box::new(move |row: &[String]| {
@@ -197,12 +214,12 @@ impl Database {
             Box::new(|_| true)
         };
 
-        // 6. 执行更新 (修改为使用 String)
+        // 7. 执行更新
         let mut affected_rows = 0;
         for row in &mut table.data {
             if filter_fn(row) {
                 affected_rows += 1;
-                for (col_name, new_value) in &set {
+                for (col_name, new_value) in &processed_set {
                     if let Some(idx) = column_map.get(col_name) {
                         // 类型检查
                         match &column_types[*idx] {

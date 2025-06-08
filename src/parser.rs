@@ -450,16 +450,22 @@ fn parse_update(
                 ));
             }
             let column_name = assg.id[0].value.clone();
-            let value = assg.value.to_string();
+            // 统一处理值，确保与INSERT一致
+            let value = match assg.value {
+                Expr::Value(Value::SingleQuotedString(s)) => s,
+                Expr::Value(Value::DoubleQuotedString(s)) => s,
+                Expr::Value(Value::Number(num, _)) => num,
+                Expr::Value(Value::Null) => "NULL".to_string(),
+                _ => assg.value.to_string(),
+            };
             Ok((column_name, value))
         })
         .collect::<Result<Vec<(String, String)>, String>>()?;
     
     let where_clause = selection.map(|expr| {
-        // 标准化条件表达式字符串
         expr.to_string()
-            .replace('\'', "\"") // 正确写法：第一个参数是char，第二个是&str
-            .replace("IS NULL", "IS \"\"")  // 处理NULL情况
+            .replace('\'', "\"")
+            .replace("IS NULL", "IS \"\"")
             .replace("IS NOT NULL", "IS NOT \"\"")
     });
     
@@ -469,6 +475,8 @@ fn parse_update(
         where_clause,
     })
 }
+
+
 
 fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Result<SqlAst, String> {
     let table_name = match table_with_joins.relation {

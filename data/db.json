@@ -1,7 +1,7 @@
 {
   "tables": [
     {
-      "name": "books_test14",
+      "name": "books_test10",
       "columns": [
         {
           "name": "id",
@@ -15,14 +15,6 @@
           "name": "name",
           "data_type": {
             "Varchar": 100
-          },
-          "is_primary": false,
-          "not_null": false
-        },
-        {
-          "name": "left_num",
-          "data_type": {
-            "Int": 10
           },
           "is_primary": false,
           "not_null": false
@@ -34,61 +26,18 @@
           },
           "is_primary": false,
           "not_null": false
-        },
-        {
-          "name": "price",
-          "data_type": {
-            "Int": 10
-          },
-          "is_primary": false,
-          "not_null": true
         }
       ],
       "data": [
         [
           "1",
-          "SETI",
-          "",
-          "Search for ET",
-          "32"
+          "Unsold",
+          "Search for ET"
         ],
         [
           "2",
-          "Rust Porgraming",
-          "23",
-          "",
-          "66"
-        ]
-      ]
-    },
-    {
-      "name": "genres",
-      "columns": [
-        {
-          "name": "id",
-          "data_type": {
-            "Int": 10
-          },
-          "is_primary": true,
-          "not_null": true
-        },
-        {
-          "name": "name",
-          "data_type": {
-            "Varchar": 100
-          },
-          "is_primary": false,
-          "not_null": true
-        }
-      ],
-      "data": [
-        [
-          "1",
-          "Science Fiction"
-        ],
-        [
-          "2",
-          "Action"
+          "Rust Programing2",
+          "Another book for rust development"
         ]
       ]
     }
