@@ -377,21 +377,27 @@ impl Database {
         Ok(result)
     }
 
-    fn parse_condition(
+    pub fn parse_condition(
         cond: &str,
         table: &Table,
     ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
-        // 调试：打印原始条件
-        //println!("[DEBUG] Raw WHERE condition: {:?}", cond);
+        // 首先检查是否包含 AND 关键字（不区分大小写）
+        if cond.to_uppercase().contains(" AND ") {
+            return Self::parse_and_condition(cond, table);
+        }
+        Self::parse_single_condition(cond, table)
+    }
 
-        // 解析条件部分（支持带引号的字符串）
+    fn parse_single_condition(
+        cond: &str,
+        table: &Table,
+    ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
+        // 原有 parse_condition 的实现内容
         let re = regex::Regex::new(r#"(?:("[^"]*")|('[^']*')|(\S+))"#).unwrap();
         let parts: Vec<&str> = re.find_iter(cond)
             .map(|m| m.as_str())
             .collect();
-        //println!("[DEBUG] Split parts: {:?}", parts);
 
-        // 验证基本格式
         if parts.len() != 3 && !(parts.len() == 4 && parts[1] == "IS" && (parts[3] == "NULL" || parts[3] == "NOT NULL")) {
             return Err(format!("Invalid WHERE format. Expected 'column op value', got: {:?}", parts));
         }
@@ -405,55 +411,116 @@ impl Database {
                 parts[2].to_string()
             }
         );
-        //println!("[DEBUG] Parsed elements - column: {:?}, operator: {:?}, raw_value: {:?}", col, op, raw_val);
 
-        // 统一去除引号（支持双引号和单引号）
         let val = raw_val.trim_matches(|c| c == '"' || c == '\'').to_string();
-        //println!("[DEBUG] Trimmed value: {:?}", val);
-
-        // 获取列索引
         let col_idx = table.columns.iter()
             .position(|c| c.name == col)
             .ok_or(format!("Column '{}' not found in table", col))?;
-        //println!("[DEBUG] Column '{}' index: {}", col, col_idx);
 
         Ok(match op {
-            // 数值比较（自动去引号并转为i32）
             ">" => Box::new(move |row| {
                 let row_val = row[col_idx].trim_matches('"').parse::<i32>().unwrap_or(0);
                 let cond_val = val.parse::<i32>().unwrap_or(0);
-                //println!("[COMPARE] {} > {} ? {}", row_val, cond_val, row_val > cond_val);
                 row_val > cond_val
             }),
             "<" => Box::new(move |row| {
                 let row_val = row[col_idx].trim_matches('"').parse::<i32>().unwrap_or(0);
                 let cond_val = val.parse::<i32>().unwrap_or(0);
-                //println!("[COMPARE] {} < {} ? {}", row_val, cond_val, row_val < cond_val);
                 row_val < cond_val
             }),
-
-            // 字符串相等比较（统一去引号）
             "=" => Box::new(move |row| {
                 let row_val = row[col_idx].trim_matches('"');
-                //println!("[COMPARE] {:?} == {:?} ? {}", row_val, val, row_val == val);
                 row_val == val
             }),
-
-            // NULL 检查
             "IS" if val == "NULL" => Box::new(move |row| {
-                let is_null = row[col_idx].trim_matches('"').is_empty();
-                //println!("[CHECK NULL] {:?} is empty? {}", row[col_idx], is_null);
-                is_null
+                row[col_idx].trim_matches('"').is_empty()
             }),
             "IS" if val == "NOT NULL" => Box::new(move |row| {
-                let not_null = !row[col_idx].trim_matches('"').is_empty();
-                //println!("[CHECK NOT NULL] {:?} is not empty? {}", row[col_idx], not_null);
-                not_null
+                !row[col_idx].trim_matches('"').is_empty()
             }),
-
             _ => return Err(format!("Unsupported operator: {}", op)),
         })
     }
+    
+    fn parse_and_condition(
+        cond: &str,
+        table: &Table,
+    ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
+        //println!("[DEBUG] Original condition: {}", cond);
+        
+        // 分割条件，处理可能的嵌套情况
+        let mut parts = Vec::new();
+        let mut current_part = String::new();
+        let mut in_quotes = false;
+        let mut paren_depth = 0;
+        let mut chars = cond.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            //println!("[DEBUG] Processing char: '{}', in_quotes: {}, paren_depth: {}, current_part: '{}'", 
+                //c, in_quotes, paren_depth, current_part);
+
+            match c {
+                '"' | '\'' => {
+                    in_quotes = !in_quotes;
+                    current_part.push(c);
+                }
+                '(' if !in_quotes => {
+                    paren_depth += 1;
+                    current_part.push(c);
+                }
+                ')' if !in_quotes => {
+                    paren_depth -= 1;
+                    current_part.push(c);
+                }
+                _ if c.to_ascii_uppercase() == 'A' 
+                    && !in_quotes 
+                    && paren_depth == 0 
+                    && current_part.ends_with(' ') => {
+                    
+                    // 检查是否是完整的AND关键字
+                    let mut and_chars = vec!['A'];
+                    for _ in 0..2 {
+                        if let Some(&next_c) = chars.peek() {
+                            and_chars.push(next_c.to_ascii_uppercase());
+                            chars.next();
+                        }
+                    }
+
+                    if and_chars == ['A', 'N', 'D'] && chars.peek().map_or(true, |c| c.is_whitespace()) {
+                        // 确认是AND关键字
+                        parts.push(current_part.trim().to_string());
+                        current_part.clear();
+                    } else {
+                        // 不是完整的AND，把字符加回去
+                        current_part.push(c);
+                        current_part.extend(&and_chars[1..]);
+                    }
+                }
+                _ => current_part.push(c),
+            }
+        }
+        parts.push(current_part.trim().to_string());
+        
+        //println!("[DEBUG] Split parts: {:?}", parts);
+
+        if parts.len() < 2 {
+            return Err("Invalid AND condition".into());
+        }
+
+        // 解析各个子条件
+        let mut conditions = Vec::new();
+        for part in parts {
+            //println!("[DEBUG] Parsing part: '{}'", part);
+            let cond = Self::parse_single_condition(&part, table)?;
+            conditions.push(cond);
+        }
+
+        // 组合条件
+        Ok(Box::new(move |row| {
+            conditions.iter().all(|cond| cond(row))
+        }))
+    }
+
 
 
 

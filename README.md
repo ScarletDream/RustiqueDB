@@ -53,6 +53,7 @@ eg:DELETE FROM books_test10 WHERE discription="A book for rust development";
 
 SELECT 需要支持and 样例11
 eg:SELECT name, price*2 FROM books_test11 where id < 3 and id > 1;
+SELECT name, price FROM books_test11 where id < 3 and id > 1;
 
 样例12 表达式
 
