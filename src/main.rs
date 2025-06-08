@@ -199,20 +199,15 @@ fn main() {
                             Err(e) => eprintln!("Delete error: {}", e),
                         }
                     }
-                    SqlAst::Drop { table_name, if_exists } => {
-                        match db.drop_table(&table_name, if_exists) {
-                            Ok(()) => {
-                                println!("Table '{}' dropped successfully", table_name);
-                                // 保存数据库（与其他写操作一致）
-                                if let Err(e) = db.save() {
-                                    eprintln!("Failed to save database: {}", e);
-                                    //return Err(e);
-                                }
-                                //Ok(())
+                    SqlAst::Drop { tables, if_exists } => {
+                        match db.drop_tables(&tables, if_exists) {
+                            Ok(count) => {
+                                println!("Dropped {} table(s)", count);
+                                db.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
                             }
                             Err(e) => eprintln!("Drop error: {}", e),
                         }
-                    }          
+                    }   
                 }
             }
             Err(e) => eprintln!("Parse error: {}", e),

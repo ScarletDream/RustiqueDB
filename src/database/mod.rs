@@ -272,22 +272,29 @@ impl Database {
         serde_json::from_str(&json).map_err(|e| e.to_string())
     }
 
-    pub fn drop_table(&mut self, table_name: &str, if_exists: bool) -> Result<(), String> {
-        let pos = self.tables.iter().position(|t| t.name == table_name);
+    pub fn drop_tables(&mut self, table_names: &[String], if_exists: bool) -> Result<usize, String> {
+        let original_count = self.tables.len();
         
-        match pos {
-            Some(index) => {
-                self.tables.remove(index);
-                Ok(())
-            }
-            None => {
-                if if_exists {
-                    Ok(())
-                } else {
-                    Err(format!("Table '{}' doesn't exist", table_name))
+        // 只有 if_exists=false 时才检查存在性
+        if !if_exists {
+            for name in table_names {
+                if !self.tables.iter().any(|t| &t.name == name) {
+                    return Err(format!("Table '{}' doesn't exist", name));
                 }
             }
         }
+
+        // 执行删除（自动跳过不存在的表）
+        self.tables.retain(|table| !table_names.contains(&table.name));
+        
+        let dropped_count = original_count - self.tables.len();
+        
+        // 如果实际删除数量为0且指定了必须存在，报错
+        if dropped_count == 0 && !if_exists {
+            return Err("No tables were dropped".into());
+        }
+        
+        Ok(dropped_count)
     }
 
     pub fn select(
@@ -370,45 +377,84 @@ impl Database {
         Ok(result)
     }
 
-    // 条件解析器
-    fn parse_condition<'a>(
-        cond: &'a str,
-        table: &'a Table,
-    ) -> Result<Box<dyn Fn(&[String]) -> bool + 'a>, String> {
-        let parts: Vec<&str> = cond.split_whitespace().collect();
+    fn parse_condition(
+        cond: &str,
+        table: &Table,
+    ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
+        // 调试：打印原始条件
+        //println!("[DEBUG] Raw WHERE condition: {:?}", cond);
+
+        // 解析条件部分（支持带引号的字符串）
+        let re = regex::Regex::new(r#"(?:("[^"]*")|('[^']*')|(\S+))"#).unwrap();
+        let parts: Vec<&str> = re.find_iter(cond)
+            .map(|m| m.as_str())
+            .collect();
+        //println!("[DEBUG] Split parts: {:?}", parts);
+
+        // 验证基本格式
         if parts.len() != 3 && !(parts.len() == 4 && parts[1] == "IS" && (parts[3] == "NULL" || parts[3] == "NOT NULL")) {
-            return Err("Invalid WHERE format".into());
+            return Err(format!("Invalid WHERE format. Expected 'column op value', got: {:?}", parts));
         }
 
-        let (col, op, val) = if parts.len() == 4 {
-            (parts[0], parts[1], parts[2..].join(" "))
-        } else {
-            (parts[0], parts[1], parts[2].to_string())
-        };
+        let (col, op, raw_val) = (
+            parts[0],
+            parts[1],
+            if parts.len() == 4 {
+                parts[2..].join(" ")
+            } else {
+                parts[2].to_string()
+            }
+        );
+        //println!("[DEBUG] Parsed elements - column: {:?}, operator: {:?}, raw_value: {:?}", col, op, raw_val);
 
-        let col_idx = table.columns.iter().position(|c| c.name == col)
-            .ok_or(format!("Column '{}' not found", col))?;
+        // 统一去除引号（支持双引号和单引号）
+        let val = raw_val.trim_matches(|c| c == '"' || c == '\'').to_string();
+        //println!("[DEBUG] Trimmed value: {:?}", val);
+
+        // 获取列索引
+        let col_idx = table.columns.iter()
+            .position(|c| c.name == col)
+            .ok_or(format!("Column '{}' not found in table", col))?;
+        //println!("[DEBUG] Column '{}' index: {}", col, col_idx);
 
         Ok(match op {
-            ">" => Box::new(move |row| row[col_idx].parse::<i32>().ok().unwrap_or(0) > val.parse::<i32>().unwrap_or(0)),
-            "<" => Box::new(move |row| row[col_idx].parse::<i32>().ok().unwrap_or(0) < val.parse::<i32>().unwrap_or(0)),
-            "=" => Box::new(move |row| row[col_idx] == val),
-            "IS" => {
-                if val == "NULL" {
-                    Box::new(move |row| {
-                        let val = &row[col_idx];
-                        val.is_empty() || val.eq_ignore_ascii_case("NULL")
-                    })
-                } else if val == "NOT NULL" {
-                    Box::new(move |row| {
-                        let val = &row[col_idx];
-                        !val.is_empty() && !val.eq_ignore_ascii_case("NULL")
-                    })
-                } else {
-                    return Err(format!("Unsupported IS condition: {}", val));
-                }
-            },
+            // 数值比较（自动去引号并转为i32）
+            ">" => Box::new(move |row| {
+                let row_val = row[col_idx].trim_matches('"').parse::<i32>().unwrap_or(0);
+                let cond_val = val.parse::<i32>().unwrap_or(0);
+                //println!("[COMPARE] {} > {} ? {}", row_val, cond_val, row_val > cond_val);
+                row_val > cond_val
+            }),
+            "<" => Box::new(move |row| {
+                let row_val = row[col_idx].trim_matches('"').parse::<i32>().unwrap_or(0);
+                let cond_val = val.parse::<i32>().unwrap_or(0);
+                //println!("[COMPARE] {} < {} ? {}", row_val, cond_val, row_val < cond_val);
+                row_val < cond_val
+            }),
+
+            // 字符串相等比较（统一去引号）
+            "=" => Box::new(move |row| {
+                let row_val = row[col_idx].trim_matches('"');
+                //println!("[COMPARE] {:?} == {:?} ? {}", row_val, val, row_val == val);
+                row_val == val
+            }),
+
+            // NULL 检查
+            "IS" if val == "NULL" => Box::new(move |row| {
+                let is_null = row[col_idx].trim_matches('"').is_empty();
+                //println!("[CHECK NULL] {:?} is empty? {}", row[col_idx], is_null);
+                is_null
+            }),
+            "IS" if val == "NOT NULL" => Box::new(move |row| {
+                let not_null = !row[col_idx].trim_matches('"').is_empty();
+                //println!("[CHECK NOT NULL] {:?} is not empty? {}", row[col_idx], not_null);
+                not_null
+            }),
+
             _ => return Err(format!("Unsupported operator: {}", op)),
         })
     }
+
+
+
 }

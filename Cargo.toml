@@ -8,3 +8,4 @@ serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 serde_json = "1.0"
 sqlparser = "0.37"  # 添加 SQLParser 依赖
+regex = "1.10"  # 新增正则支持

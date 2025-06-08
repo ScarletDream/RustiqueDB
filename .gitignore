@@ -29,3 +29,7 @@ coverage/
 # 忽略提交规则
 commitlint.config.js
 target/
+
+公开测试用例/
+
+README.md

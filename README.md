@@ -42,3 +42,21 @@ cargo doc --open
 - [ ] SELECT计算表达式
 - [ ] 多行SQL支持
 - [ ] 特色功能
+
+测试样例出现的错误
+
+DROP 需支持多个表同时丢弃 样例8 (true)
+eg:DROP TABLE movies_test8, movies2_test8;
+
+DELETE 好像字符串匹配有问题 样例10
+eg:DELETE FROM books_test10 WHERE discription="A book for rust development";
+
+SELECT 需要支持and 样例11
+eg:SELECT name, price*2 FROM books_test11 where id < 3 and id > 1;
+
+样例12 表达式
+
+
+样例13 
+INSERT INTO books_test13 (id, name, price) VALUES (2, "Rust Porgraming", 66);
+

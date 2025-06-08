@@ -34,9 +34,9 @@ pub enum SqlAst {
         table: String,
         where_clause: Option<String>,
     },
-    Drop { 
-        table_name: String,
-        if_exists: bool,  // 是否包含 IF EXISTS 子句
+    Drop {
+        tables: Vec<String>,
+        if_exists: bool,  // 保留此字段
     },
 }
 
@@ -137,8 +137,9 @@ pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
                 let table_with_joins = from.into_iter().next().unwrap();
                 parse_delete(table_with_joins, selection)
             }
-            Statement::Drop { object_type, if_exists, names, .. } => {
-                parse_drop(object_type, if_exists, names)
+            Statement::Drop { object_type, if_exists, names, ..}
+            if object_type == ObjectType::Table => {
+                parse_drop_table(names, if_exists)
             }
             _ => parse_calculation(input.trim()) // 如果不是支持的SQL语句，尝试解析为计算表达式
         },
@@ -393,8 +394,6 @@ fn parse_insert(table_name: ObjectName, source: Box<Query>) -> Result<SqlAst, St
 }
 
 
-
-
 fn parse_update(
     table: TableWithJoins,
     assignments: Vec<Assignment>,
@@ -420,7 +419,13 @@ fn parse_update(
         })
         .collect::<Result<Vec<(String, String)>, String>>()?;
     
-    let where_clause = selection.map(|expr| expr.to_string());
+    let where_clause = selection.map(|expr| {
+        // 标准化条件表达式字符串
+        expr.to_string()
+            .replace('\'', "\"") // 正确写法：第一个参数是char，第二个是&str
+            .replace("IS NULL", "IS \"\"")  // 处理NULL情况
+            .replace("IS NOT NULL", "IS NOT \"\"")
+    });
     
     Ok(SqlAst::Update {
         table: table_name,
@@ -447,24 +452,11 @@ fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Re
     })
 }
 
-fn parse_drop(
-    object_type: ObjectType,
-    if_exists: bool,
-    names: Vec<ObjectName>,
-) -> Result<SqlAst, String> {
-    // 目前只支持 DROP TABLE
-    if object_type != ObjectType::Table {
-        return Err("Only DROP TABLE is supported".into());
-    }
-
-    if names.len() != 1 {
-        return Err("DROP TABLE only supports single table".into());
-    }
-
-    let table_name = names[0].to_string(); // 简化处理，实际可能需要处理带schema的情况
-
-    Ok(SqlAst::Drop { 
-        table_name,
-        if_exists,
-    })
+fn parse_drop_table(names: Vec<ObjectName>, if_exists: bool) -> Result<SqlAst, String> {
+    let tables = names
+        .into_iter()
+        .map(|name| name.to_string())
+        .collect();
+    
+    Ok(SqlAst::Drop { tables, if_exists })
 }
