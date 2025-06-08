@@ -68,8 +68,9 @@ impl Database {
     pub fn insert(
         &mut self,
         table_name: &str,
-        values: Vec<Vec<&str>>, // 改为接收多行数据
-    ) -> Result<usize, String> { // 返回插入的行数
+        columns: Option<Vec<String>>, // 新增：可选列名列表
+        values: Vec<Vec<&str>>,
+    ) -> Result<usize, String> {
         let table = self.tables.iter_mut()
             .find(|t| t.name == table_name)
             .ok_or("Table not found")?;
@@ -77,13 +78,35 @@ impl Database {
         let mut inserted_rows = 0;
 
         for row_values in values {
-            // 列数检查
-            if row_values.len() != table.columns.len() {
-                return Err("Column count mismatch".into());
-            }
+            // 处理部分插入
+            let full_row_values = if let Some(col_names) = &columns {
+                // 创建完整行数据，未指定的列设为空字符串
+                let mut full_row = vec![""; table.columns.len()];
+                
+                // 检查列名是否匹配
+                if col_names.len() != row_values.len() {
+                    return Err("Column count mismatch in INSERT statement".into());
+                }
+                
+                for (i, col_name) in col_names.iter().enumerate() {
+                    let col_index = table.columns.iter()
+                        .position(|c| &c.name == col_name)
+                        .ok_or(format!("Column '{}' not found", col_name))?;
+                    
+                    full_row[col_index] = row_values[i];
+                }
+                
+                full_row
+            } else {
+                // 全列插入
+                if row_values.len() != table.columns.len() {
+                    return Err("Column count mismatch".into());
+                }
+                row_values
+            };
 
             // 检查NOT NULL约束和主键
-            for (i, (value, column)) in row_values.iter().zip(&table.columns).enumerate() {
+            for (i, (value, column)) in full_row_values.iter().zip(&table.columns).enumerate() {
                 let is_null = value.trim().is_empty() || value.trim().eq_ignore_ascii_case("null");
                 
                 if column.not_null && is_null {
@@ -97,7 +120,7 @@ impl Database {
 
             // 主键唯一性检查
             if let Some(pk_index) = table.columns.iter().position(|c| c.is_primary) {
-                let pk_value = row_values[pk_index];
+                let pk_value = full_row_values[pk_index];
                 if !pk_value.trim().is_empty() && !pk_value.trim().eq_ignore_ascii_case("null") {
                     if table.data.iter().any(|row| row[pk_index] == pk_value) {
                         return Err(format!("Duplicate entry '{}' for key 'PRIMARY'", pk_value));
@@ -105,7 +128,7 @@ impl Database {
                 }
             }
 
-            let row: Vec<String> = row_values.iter().map(|s| {
+            let row: Vec<String> = full_row_values.iter().map(|s| {
                 if s.trim().eq_ignore_ascii_case("null") {
                     String::new()
                 } else {
@@ -119,8 +142,6 @@ impl Database {
 
         Ok(inserted_rows)
     }
-
-
 
     pub fn update(
         &mut self,
@@ -210,8 +231,6 @@ impl Database {
         Ok(affected_rows)
     }
 
-
-
     pub fn delete(&mut self,table_name: &str,condition: Option<&str>,) -> Result<usize, String> {
         // 1. 获取表的可变引用
         let table = self.tables
@@ -247,8 +266,6 @@ impl Database {
 
         Ok(affected_rows)
     }
-
-
 
     pub fn save(&self) -> Result<(), String> {
         // 创建data目录（如果不存在）
@@ -520,8 +537,6 @@ impl Database {
             conditions.iter().all(|cond| cond(row))
         }))
     }
-
-
 
 
 }
