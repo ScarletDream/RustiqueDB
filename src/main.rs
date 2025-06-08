@@ -153,13 +153,13 @@ fn main() {
                             eprintln!("Failed to save database: {}", e);
                         }
                     }
-                    SqlAst::Insert { table, values } => {
+                    SqlAst::Insert { table, columns, values } => {
                         // 转换为 Vec<Vec<&str>> 供数据库处理
                         let values_ref: Vec<Vec<&str>> = values.iter()
                             .map(|row| row.iter().map(|s| s.as_str()).collect())
                             .collect();
                         
-                        match db.insert(&table, values_ref) {
+                        match db.insert(&table, columns, values_ref) {  // 直接传入 columns
                             Ok(count) => {
                                 println!("{} row(s) inserted", count);
                                 if let Err(e) = db.save() {
@@ -169,6 +169,7 @@ fn main() {
                             Err(e) => eprintln!("Insert error: {}", e),
                         }
                     }
+
 
                     SqlAst::Update { table, set, where_clause } => {
                         let cond_str = where_clause.as_deref();
@@ -199,20 +200,15 @@ fn main() {
                             Err(e) => eprintln!("Delete error: {}", e),
                         }
                     }
-                    SqlAst::Drop { table_name, if_exists } => {
-                        match db.drop_table(&table_name, if_exists) {
-                            Ok(()) => {
-                                println!("Table '{}' dropped successfully", table_name);
-                                // 保存数据库（与其他写操作一致）
-                                if let Err(e) = db.save() {
-                                    eprintln!("Failed to save database: {}", e);
-                                    //return Err(e);
-                                }
-                                //Ok(())
+                    SqlAst::Drop { tables, if_exists } => {
+                        match db.drop_tables(&tables, if_exists) {
+                            Ok(count) => {
+                                println!("Dropped {} table(s)", count);
+                                db.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
                             }
                             Err(e) => eprintln!("Drop error: {}", e),
                         }
-                    }          
+                    }   
                 }
             }
             Err(e) => eprintln!("Parse error: {}", e),

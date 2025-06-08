@@ -23,6 +23,7 @@ pub enum SqlAst {
     },
     Insert {
         table: String,
+        columns: Option<Vec<String>>, // 新增：可选列名列表
         values: Vec<Vec<String>>,  // 修改为支持多行
     },
     Update {
@@ -34,9 +35,9 @@ pub enum SqlAst {
         table: String,
         where_clause: Option<String>,
     },
-    Drop { 
-        table_name: String,
-        if_exists: bool,  // 是否包含 IF EXISTS 子句
+    Drop {
+        tables: Vec<String>,
+        if_exists: bool,  // 保留此字段
     },
 }
 
@@ -115,36 +116,45 @@ fn apply_operator(op: char, left: f64, right: f64) -> Result<f64, String> {
 pub fn parse_sql(input: &str) -> Result<SqlAst, String> {
     let dialect = GenericDialect {};
     let mut parser = Parser::new(&dialect);
-
+    
     // 首先尝试解析为常规SQL语句
     match parser.try_with_sql(input)
         .map_err(|e| e.to_string())
         .and_then(|mut p| p.parse_statement().map_err(|e| e.to_string()))
     {
-        Ok(ast) => match ast {
-            Statement::Query(query) => parse_select(&query),
-            Statement::CreateTable { name, columns, constraints, .. } => {
-                parse_create_table(name, columns, constraints)
-            }
-            Statement::Insert { table_name, source, .. } => parse_insert(table_name, source),
-            Statement::Update { table, assignments, selection, .. } => {
-                parse_update(table, assignments, selection)
-            }
-            Statement::Delete { from, selection, .. } => {
-                if from.len() != 1 {
-                    return Err("DELETE statement only supports single table".into());
+        Ok(ast) => {
+            // 在这里添加打印语句，查看解析后的AST
+            //println!("{:#?}", ast);
+            
+            match ast {
+                Statement::Query(query) => parse_select(&query),
+                Statement::CreateTable { name, columns, constraints, .. } => {
+                    parse_create_table(name, columns, constraints)
                 }
-                let table_with_joins = from.into_iter().next().unwrap();
-                parse_delete(table_with_joins, selection)
+                Statement::Insert { table_name, columns, source, .. } => {
+                    parse_insert(table_name, columns, source)
+                }
+                Statement::Update { table, assignments, selection, .. } => {
+                    parse_update(table, assignments, selection)
+                }
+                Statement::Delete { from, selection, .. } => {
+                    if from.len() != 1 {
+                        return Err("DELETE statement only supports single table".into());
+                    }
+                    let table_with_joins = from.into_iter().next().unwrap();
+                    parse_delete(table_with_joins, selection)
+                }
+                Statement::Drop { object_type, if_exists, names, ..}
+                if object_type == ObjectType::Table => {
+                    parse_drop_table(names, if_exists)
+                }
+                _ => parse_calculation(input.trim()) // 如果不是支持的SQL语句，尝试解析为计算表达式
             }
-            Statement::Drop { object_type, if_exists, names, .. } => {
-                parse_drop(object_type, if_exists, names)
-            }
-            _ => parse_calculation(input.trim()) // 如果不是支持的SQL语句，尝试解析为计算表达式
         },
         Err(_) => parse_calculation(input.trim()) // 如果解析失败，尝试解析为计算表达式
     }
 }
+
 
 fn parse_select(query: &Query) -> Result<SqlAst, String> {
     match query.body.as_ref() {
@@ -370,26 +380,51 @@ fn parse_create_table(
 
 
 
-fn parse_insert(table_name: ObjectName, source: Box<Query>) -> Result<SqlAst, String> {
+fn parse_insert(table_name: ObjectName, columns: Vec<Ident>, source: Box<Query>) -> Result<SqlAst, String> {
     let table = table_name.to_string();
     
-    match *source.body {
+    // 处理列名 - 明确指定Option的类型
+    let column_names: Option<Vec<String>> = if columns.is_empty() {
+        None // 表示插入所有列
+    } else {
+        Some(columns.into_iter().map(|ident| ident.value).collect())
+    };
+
+    // 处理VALUES子句
+    let values = match *source.body {
         SetExpr::Values(values) => {
-            let parsed_values = values.rows.iter()
-                .map(|row| {
-                    row.iter()
-                        .map(|expr| expr.to_string())
-                        .collect()
-                })
-                .collect();
-            
-            Ok(SqlAst::Insert {
-                table,
-                values: parsed_values,
-            })
+            values.rows.into_iter().map(|row| {
+                row.into_iter().map(|expr| {
+                    match expr {
+                        Expr::Value(value) => match value {
+                            Value::Number(num, _) => Ok(num),
+                            Value::SingleQuotedString(s) => Ok(s),
+                            Value::DoubleQuotedString(s) => Ok(s),
+                            Value::Null => Ok("NULL".to_string()),
+                            _ => Err(format!("Unsupported value type: {:?}", value)),
+                        },
+                        Expr::Identifier(ident) => Ok(ident.value),
+                        _ => Err(format!("Unsupported expression type in VALUES: {:?}", expr)),
+                    }
+                }).collect::<Result<Vec<String>, String>>()
+            }).collect::<Result<Vec<Vec<String>>, String>>()?
+        },
+        _ => return Err("INSERT statement must use VALUES clause".into())
+    };
+
+    // 如果有指定列，检查列数和值数量是否匹配
+    if let Some(ref cols) = column_names {
+        if !values.is_empty() && cols.len() != values[0].len() {
+            return Err(format!("Column count mismatch: expected {}, got {}", 
+                cols.len(), values[0].len()));
         }
-        _ => Err("Only VALUES clause is supported".into()),
     }
+
+    Ok(SqlAst::Insert {
+        table,
+        columns: column_names,
+        values,
+    })
 }
 
 
@@ -420,7 +455,13 @@ fn parse_update(
         })
         .collect::<Result<Vec<(String, String)>, String>>()?;
     
-    let where_clause = selection.map(|expr| expr.to_string());
+    let where_clause = selection.map(|expr| {
+        // 标准化条件表达式字符串
+        expr.to_string()
+            .replace('\'', "\"") // 正确写法：第一个参数是char，第二个是&str
+            .replace("IS NULL", "IS \"\"")  // 处理NULL情况
+            .replace("IS NOT NULL", "IS NOT \"\"")
+    });
     
     Ok(SqlAst::Update {
         table: table_name,
@@ -447,24 +488,11 @@ fn parse_delete(table_with_joins: TableWithJoins, selection: Option<Expr>) -> Re
     })
 }
 
-fn parse_drop(
-    object_type: ObjectType,
-    if_exists: bool,
-    names: Vec<ObjectName>,
-) -> Result<SqlAst, String> {
-    // 目前只支持 DROP TABLE
-    if object_type != ObjectType::Table {
-        return Err("Only DROP TABLE is supported".into());
-    }
-
-    if names.len() != 1 {
-        return Err("DROP TABLE only supports single table".into());
-    }
-
-    let table_name = names[0].to_string(); // 简化处理，实际可能需要处理带schema的情况
-
-    Ok(SqlAst::Drop { 
-        table_name,
-        if_exists,
-    })
+fn parse_drop_table(names: Vec<ObjectName>, if_exists: bool) -> Result<SqlAst, String> {
+    let tables = names
+        .into_iter()
+        .map(|name| name.to_string())
+        .collect();
+    
+    Ok(SqlAst::Drop { tables, if_exists })
 }

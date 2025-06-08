@@ -68,8 +68,9 @@ impl Database {
     pub fn insert(
         &mut self,
         table_name: &str,
-        values: Vec<Vec<&str>>, // 改为接收多行数据
-    ) -> Result<usize, String> { // 返回插入的行数
+        columns: Option<Vec<String>>, // 新增：可选列名列表
+        values: Vec<Vec<&str>>,
+    ) -> Result<usize, String> {
         let table = self.tables.iter_mut()
             .find(|t| t.name == table_name)
             .ok_or("Table not found")?;
@@ -77,13 +78,35 @@ impl Database {
         let mut inserted_rows = 0;
 
         for row_values in values {
-            // 列数检查
-            if row_values.len() != table.columns.len() {
-                return Err("Column count mismatch".into());
-            }
+            // 处理部分插入
+            let full_row_values = if let Some(col_names) = &columns {
+                // 创建完整行数据，未指定的列设为空字符串
+                let mut full_row = vec![""; table.columns.len()];
+                
+                // 检查列名是否匹配
+                if col_names.len() != row_values.len() {
+                    return Err("Column count mismatch in INSERT statement".into());
+                }
+                
+                for (i, col_name) in col_names.iter().enumerate() {
+                    let col_index = table.columns.iter()
+                        .position(|c| &c.name == col_name)
+                        .ok_or(format!("Column '{}' not found", col_name))?;
+                    
+                    full_row[col_index] = row_values[i];
+                }
+                
+                full_row
+            } else {
+                // 全列插入
+                if row_values.len() != table.columns.len() {
+                    return Err("Column count mismatch".into());
+                }
+                row_values
+            };
 
             // 检查NOT NULL约束和主键
-            for (i, (value, column)) in row_values.iter().zip(&table.columns).enumerate() {
+            for (i, (value, column)) in full_row_values.iter().zip(&table.columns).enumerate() {
                 let is_null = value.trim().is_empty() || value.trim().eq_ignore_ascii_case("null");
                 
                 if column.not_null && is_null {
@@ -97,7 +120,7 @@ impl Database {
 
             // 主键唯一性检查
             if let Some(pk_index) = table.columns.iter().position(|c| c.is_primary) {
-                let pk_value = row_values[pk_index];
+                let pk_value = full_row_values[pk_index];
                 if !pk_value.trim().is_empty() && !pk_value.trim().eq_ignore_ascii_case("null") {
                     if table.data.iter().any(|row| row[pk_index] == pk_value) {
                         return Err(format!("Duplicate entry '{}' for key 'PRIMARY'", pk_value));
@@ -105,7 +128,7 @@ impl Database {
                 }
             }
 
-            let row: Vec<String> = row_values.iter().map(|s| {
+            let row: Vec<String> = full_row_values.iter().map(|s| {
                 if s.trim().eq_ignore_ascii_case("null") {
                     String::new()
                 } else {
@@ -119,8 +142,6 @@ impl Database {
 
         Ok(inserted_rows)
     }
-
-
 
     pub fn update(
         &mut self,
@@ -210,8 +231,6 @@ impl Database {
         Ok(affected_rows)
     }
 
-
-
     pub fn delete(&mut self,table_name: &str,condition: Option<&str>,) -> Result<usize, String> {
         // 1. 获取表的可变引用
         let table = self.tables
@@ -248,8 +267,6 @@ impl Database {
         Ok(affected_rows)
     }
 
-
-
     pub fn save(&self) -> Result<(), String> {
         // 创建data目录（如果不存在）
         fs::create_dir_all("data").map_err(|e| e.to_string())?;
@@ -272,22 +289,29 @@ impl Database {
         serde_json::from_str(&json).map_err(|e| e.to_string())
     }
 
-    pub fn drop_table(&mut self, table_name: &str, if_exists: bool) -> Result<(), String> {
-        let pos = self.tables.iter().position(|t| t.name == table_name);
+    pub fn drop_tables(&mut self, table_names: &[String], if_exists: bool) -> Result<usize, String> {
+        let original_count = self.tables.len();
         
-        match pos {
-            Some(index) => {
-                self.tables.remove(index);
-                Ok(())
-            }
-            None => {
-                if if_exists {
-                    Ok(())
-                } else {
-                    Err(format!("Table '{}' doesn't exist", table_name))
+        // 只有 if_exists=false 时才检查存在性
+        if !if_exists {
+            for name in table_names {
+                if !self.tables.iter().any(|t| &t.name == name) {
+                    return Err(format!("Table '{}' doesn't exist", name));
                 }
             }
         }
+
+        // 执行删除（自动跳过不存在的表）
+        self.tables.retain(|table| !table_names.contains(&table.name));
+        
+        let dropped_count = original_count - self.tables.len();
+        
+        // 如果实际删除数量为0且指定了必须存在，报错
+        if dropped_count == 0 && !if_exists {
+            return Err("No tables were dropped".into());
+        }
+        
+        Ok(dropped_count)
     }
 
     pub fn select(
@@ -370,45 +394,149 @@ impl Database {
         Ok(result)
     }
 
-    // 条件解析器
-    fn parse_condition<'a>(
-        cond: &'a str,
-        table: &'a Table,
-    ) -> Result<Box<dyn Fn(&[String]) -> bool + 'a>, String> {
-        let parts: Vec<&str> = cond.split_whitespace().collect();
+    pub fn parse_condition(
+        cond: &str,
+        table: &Table,
+    ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
+        // 首先检查是否包含 AND 关键字（不区分大小写）
+        if cond.to_uppercase().contains(" AND ") {
+            return Self::parse_and_condition(cond, table);
+        }
+        Self::parse_single_condition(cond, table)
+    }
+
+    fn parse_single_condition(
+        cond: &str,
+        table: &Table,
+    ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
+        // 原有 parse_condition 的实现内容
+        let re = regex::Regex::new(r#"(?:("[^"]*")|('[^']*')|(\S+))"#).unwrap();
+        let parts: Vec<&str> = re.find_iter(cond)
+            .map(|m| m.as_str())
+            .collect();
+
         if parts.len() != 3 && !(parts.len() == 4 && parts[1] == "IS" && (parts[3] == "NULL" || parts[3] == "NOT NULL")) {
-            return Err("Invalid WHERE format".into());
+            return Err(format!("Invalid WHERE format. Expected 'column op value', got: {:?}", parts));
         }
 
-        let (col, op, val) = if parts.len() == 4 {
-            (parts[0], parts[1], parts[2..].join(" "))
-        } else {
-            (parts[0], parts[1], parts[2].to_string())
-        };
+        let (col, op, raw_val) = (
+            parts[0],
+            parts[1],
+            if parts.len() == 4 {
+                parts[2..].join(" ")
+            } else {
+                parts[2].to_string()
+            }
+        );
 
-        let col_idx = table.columns.iter().position(|c| c.name == col)
-            .ok_or(format!("Column '{}' not found", col))?;
+        let val = raw_val.trim_matches(|c| c == '"' || c == '\'').to_string();
+        let col_idx = table.columns.iter()
+            .position(|c| c.name == col)
+            .ok_or(format!("Column '{}' not found in table", col))?;
 
         Ok(match op {
-            ">" => Box::new(move |row| row[col_idx].parse::<i32>().ok().unwrap_or(0) > val.parse::<i32>().unwrap_or(0)),
-            "<" => Box::new(move |row| row[col_idx].parse::<i32>().ok().unwrap_or(0) < val.parse::<i32>().unwrap_or(0)),
-            "=" => Box::new(move |row| row[col_idx] == val),
-            "IS" => {
-                if val == "NULL" {
-                    Box::new(move |row| {
-                        let val = &row[col_idx];
-                        val.is_empty() || val.eq_ignore_ascii_case("NULL")
-                    })
-                } else if val == "NOT NULL" {
-                    Box::new(move |row| {
-                        let val = &row[col_idx];
-                        !val.is_empty() && !val.eq_ignore_ascii_case("NULL")
-                    })
-                } else {
-                    return Err(format!("Unsupported IS condition: {}", val));
-                }
-            },
+            ">" => Box::new(move |row| {
+                let row_val = row[col_idx].trim_matches('"').parse::<i32>().unwrap_or(0);
+                let cond_val = val.parse::<i32>().unwrap_or(0);
+                row_val > cond_val
+            }),
+            "<" => Box::new(move |row| {
+                let row_val = row[col_idx].trim_matches('"').parse::<i32>().unwrap_or(0);
+                let cond_val = val.parse::<i32>().unwrap_or(0);
+                row_val < cond_val
+            }),
+            "=" => Box::new(move |row| {
+                let row_val = row[col_idx].trim_matches('"');
+                row_val == val
+            }),
+            "IS" if val == "NULL" => Box::new(move |row| {
+                row[col_idx].trim_matches('"').is_empty()
+            }),
+            "IS" if val == "NOT NULL" => Box::new(move |row| {
+                !row[col_idx].trim_matches('"').is_empty()
+            }),
             _ => return Err(format!("Unsupported operator: {}", op)),
         })
     }
+    
+    fn parse_and_condition(
+        cond: &str,
+        table: &Table,
+    ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
+        //println!("[DEBUG] Original condition: {}", cond);
+        
+        // 分割条件，处理可能的嵌套情况
+        let mut parts = Vec::new();
+        let mut current_part = String::new();
+        let mut in_quotes = false;
+        let mut paren_depth = 0;
+        let mut chars = cond.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            //println!("[DEBUG] Processing char: '{}', in_quotes: {}, paren_depth: {}, current_part: '{}'", 
+                //c, in_quotes, paren_depth, current_part);
+
+            match c {
+                '"' | '\'' => {
+                    in_quotes = !in_quotes;
+                    current_part.push(c);
+                }
+                '(' if !in_quotes => {
+                    paren_depth += 1;
+                    current_part.push(c);
+                }
+                ')' if !in_quotes => {
+                    paren_depth -= 1;
+                    current_part.push(c);
+                }
+                _ if c.to_ascii_uppercase() == 'A' 
+                    && !in_quotes 
+                    && paren_depth == 0 
+                    && current_part.ends_with(' ') => {
+                    
+                    // 检查是否是完整的AND关键字
+                    let mut and_chars = vec!['A'];
+                    for _ in 0..2 {
+                        if let Some(&next_c) = chars.peek() {
+                            and_chars.push(next_c.to_ascii_uppercase());
+                            chars.next();
+                        }
+                    }
+
+                    if and_chars == ['A', 'N', 'D'] && chars.peek().map_or(true, |c| c.is_whitespace()) {
+                        // 确认是AND关键字
+                        parts.push(current_part.trim().to_string());
+                        current_part.clear();
+                    } else {
+                        // 不是完整的AND，把字符加回去
+                        current_part.push(c);
+                        current_part.extend(&and_chars[1..]);
+                    }
+                }
+                _ => current_part.push(c),
+            }
+        }
+        parts.push(current_part.trim().to_string());
+        
+        //println!("[DEBUG] Split parts: {:?}", parts);
+
+        if parts.len() < 2 {
+            return Err("Invalid AND condition".into());
+        }
+
+        // 解析各个子条件
+        let mut conditions = Vec::new();
+        for part in parts {
+            //println!("[DEBUG] Parsing part: '{}'", part);
+            let cond = Self::parse_single_condition(&part, table)?;
+            conditions.push(cond);
+        }
+
+        // 组合条件
+        Ok(Box::new(move |row| {
+            conditions.iter().all(|cond| cond(row))
+        }))
+    }
+
+
 }
