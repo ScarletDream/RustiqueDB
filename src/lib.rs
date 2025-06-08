@@ -127,7 +127,7 @@ pub fn execute_sql(sql_statement: &str) -> bool {
                                     eprint!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
                                 } else if e.contains("cannot be null") {
                                     let col_name = e.split("'").nth(1).unwrap_or("");
-                                    eprint!("Field '{}' doesn't have a default value\n", col_name);
+                                    eprint!("Error: Field '{}' doesn't have a default value\n", col_name);
                                 } else {
                                     eprint!("{}\n", e);
                                 }
@@ -148,7 +148,7 @@ pub fn execute_sql(sql_statement: &str) -> bool {
                                     eprint!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
                                 } else if e.contains("cannot be null") {
                                     let col_name = e.split("'").nth(1).unwrap_or("");
-                                    eprint!("Field '{}' doesn't have a default value\n", col_name);
+                                    eprint!("Error: Field '{}' doesn't have a default value\n", col_name);
                                 } else {
                                     eprint!("{}\n", e);
                                 }
