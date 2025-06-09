@@ -110,11 +110,11 @@ impl Database {
                 let is_null = value.trim().is_empty() || value.trim().eq_ignore_ascii_case("null");
                 
                 if column.not_null && is_null {
-                    return Err(format!("Column '{}' cannot be null", column.name));
+                    return Err(format!("Error: Field '{}' doesn't have a default value", column.name));
                 }
-                
+
                 if column.is_primary && is_null {
-                    return Err(format!("Primary key '{}' cannot be null", column.name));
+                    return Err(format!("Error: Field '{}' doesn't have a default value", column.name));
                 }
             }
 

@@ -122,14 +122,14 @@ pub fn execute_sql(sql_statement: &str) -> bool {
                                 //print!("{} row(s) inserted\n", count);
                             }
                             Err(e) => {
-                                if e.contains("Duplicate entry") {
-                                    let value = e.split("'").nth(1).unwrap_or("");
-                                    eprint!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
-                                } else if e.contains("cannot be null") {
-                                    let col_name = e.split("'").nth(1).unwrap_or("");
+                                if e.contains("doesn't have a default value") {
+                                    let col_name = e.split('\'').nth(1).unwrap_or("");
                                     eprint!("Error: Field '{}' doesn't have a default value\n", col_name);
+                                } else if e.contains("Duplicate entry") {
+                                    let value = e.split('\'').nth(1).unwrap_or("");
+                                    eprint!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
                                 } else {
-                                    eprint!("{}\n", e);
+                                    eprint!("Error: {}\n", e);
                                 }
                                 has_error = true;
                             },
@@ -143,14 +143,14 @@ pub fn execute_sql(sql_statement: &str) -> bool {
                                 //print!("{} row(s) updated\n", count);
                             }
                             Err(e) => {
-                                if e.contains("Duplicate entry") {
-                                    let value = e.split("'").nth(1).unwrap_or("");
-                                    eprint!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
-                                } else if e.contains("cannot be null") {
-                                    let col_name = e.split("'").nth(1).unwrap_or("");
+                                if e.contains("doesn't have a default value") {
+                                    let col_name = e.split('\'').nth(1).unwrap_or("");
                                     eprint!("Error: Field '{}' doesn't have a default value\n", col_name);
+                                } else if e.contains("Duplicate entry") {
+                                    let value = e.split('\'').nth(1).unwrap_or("");
+                                    eprint!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
                                 } else {
-                                    eprint!("{}\n", e);
+                                    eprint!("Error: {}\n", e);
                                 }
                                 has_error = true;
                             },
