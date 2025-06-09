@@ -1,0 +1,12 @@
+CREATE TABLE books_test12 (
+    id INT(32) PRIMARY KEY,
+    name VARCHAR(100),
+    discription VARCHAR(150),
+    price INT
+);
+
+INSERT INTO books_test12 VALUES (1, "SETI", "Search for ET", 32);
+INSERT INTO books_test12 VALUES (2, "Rust Porgraming", "A book for rust development", 66);
+
+-- 查询表中的所有数据
+SELECT id*price*2 FROM books_test12;

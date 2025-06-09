@@ -110,11 +110,11 @@ impl Database {
                 let is_null = value.trim().is_empty() || value.trim().eq_ignore_ascii_case("null");
                 
                 if column.not_null && is_null {
-                    return Err(format!("Column '{}' cannot be null", column.name));
+                    return Err(format!("Error: Field '{}' doesn't have a default value", column.name));
                 }
-                
+
                 if column.is_primary && is_null {
-                    return Err(format!("Primary key '{}' cannot be null", column.name));
+                    return Err(format!("Error: Field '{}' doesn't have a default value", column.name));
                 }
             }
 
@@ -146,7 +146,7 @@ impl Database {
     pub fn update(
         &mut self,
         table_name: &str,
-        set: Vec<(String, String)>,  // 已修改为 String
+        set: Vec<(String, String)>,
         condition: Option<&str>,
     ) -> Result<usize, String> {
         // 1. 获取表的可变引用
@@ -155,21 +155,38 @@ impl Database {
             .find(|t| t.name == table_name)
             .ok_or(format!("Table '{}' not found", table_name))?;
 
-        // 2. 提前收集所有需要的列信息 (无需修改)
+        // 2. 提前收集所有需要的列信息
         let column_names: Vec<String> = table.columns.iter().map(|c| c.name.clone()).collect();
         let column_types: Vec<DataType> = table.columns.iter().map(|c| c.data_type.clone()).collect();
         let not_null_flags: Vec<bool> = table.columns.iter().map(|c| c.not_null).collect();
         let is_primary_flags: Vec<bool> = table.columns.iter().map(|c| c.is_primary).collect();
 
-        // 3. 创建列名到索引的映射 (修改为使用 String)
+        // 3. 创建列名到索引的映射
         let column_map: std::collections::HashMap<String, usize> = column_names
             .iter()
             .enumerate()
             .map(|(idx, name)| (name.clone(), idx))
             .collect();
 
-        // 4. 检查主键唯一性 (修改为使用 String)
-        for (col_name, new_value) in &set {
+        // 4. 预处理set值，移除字符串值的引号
+        let processed_set: Vec<(String, String)> = set.into_iter()
+            .map(|(col_name, value)| {
+                // 统一处理值格式，与insert保持一致
+                let processed_value = if value.starts_with('"') && value.ends_with('"') {
+                    value.trim_matches('"').to_string()
+                } else if value.starts_with('\'') && value.ends_with('\'') {
+                    value.trim_matches('\'').to_string()
+                } else if value.eq_ignore_ascii_case("null") {
+                    String::new() // 存储为""表示NULL
+                } else {
+                    value
+                };
+                (col_name, processed_value)
+            })
+            .collect();
+
+        // 5. 检查主键唯一性
+        for (col_name, new_value) in &processed_set {
             if let Some(idx) = column_map.get(col_name) {
                 if is_primary_flags[*idx] {
                     if table.data.iter().any(|row| &row[*idx] == new_value) {
@@ -179,7 +196,7 @@ impl Database {
             }
         }
 
-        // 5. 过滤函数 (无需修改)
+        // 6. 创建过滤闭包
         let filter_fn: Box<dyn Fn(&[String]) -> bool> = if let Some(cond) = condition {
             let columns = table.columns.clone();
             Box::new(move |row: &[String]| {
@@ -197,12 +214,12 @@ impl Database {
             Box::new(|_| true)
         };
 
-        // 6. 执行更新 (修改为使用 String)
+        // 7. 执行更新
         let mut affected_rows = 0;
         for row in &mut table.data {
             if filter_fn(row) {
                 affected_rows += 1;
-                for (col_name, new_value) in &set {
+                for (col_name, new_value) in &processed_set {
                     if let Some(idx) = column_map.get(col_name) {
                         // 类型检查
                         match &column_types[*idx] {
@@ -398,12 +415,94 @@ impl Database {
         cond: &str,
         table: &Table,
     ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
-        // 首先检查是否包含 AND 关键字（不区分大小写）
+        // 首先检查是否包含 OR 关键字（不区分大小写）
+        if cond.to_uppercase().contains(" OR ") {
+            return Self::parse_or_condition(cond, table);
+        }
+        // 然后检查 AND
         if cond.to_uppercase().contains(" AND ") {
             return Self::parse_and_condition(cond, table);
         }
+        // 最后尝试解析单个条件
         Self::parse_single_condition(cond, table)
     }
+
+
+    fn parse_or_condition(
+        cond: &str,
+        table: &Table,
+    ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
+        // 分割条件，处理可能的嵌套情况
+        let mut parts = Vec::new();
+        let mut current_part = String::new();
+        let mut in_quotes = false;
+        let mut paren_depth = 0;
+        let mut chars = cond.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                '"' | '\'' => {
+                    in_quotes = !in_quotes;
+                    current_part.push(c);
+                }
+                '(' if !in_quotes => {
+                    paren_depth += 1;
+                    current_part.push(c);
+                }
+                ')' if !in_quotes => {
+                    paren_depth -= 1;
+                    current_part.push(c);
+                }
+                _ if c.to_ascii_uppercase() == 'O' 
+                    && !in_quotes 
+                    && paren_depth == 0 
+                    && current_part.ends_with(' ') => {
+                    
+                    // 检查是否是完整的OR关键字
+                    let mut or_chars = vec!['O'];
+                    if let Some(&next_c) = chars.peek() {
+                        or_chars.push(next_c.to_ascii_uppercase());
+                        chars.next();
+                    }
+
+                    if or_chars == ['O', 'R'] && chars.peek().map_or(true, |c| c.is_whitespace()) {
+                        // 确认是OR关键字
+                        parts.push(current_part.trim().to_string());
+                        current_part.clear();
+                    } else {
+                        // 不是完整的OR，把字符加回去
+                        current_part.push(c);
+                        current_part.extend(&or_chars[1..]);
+                    }
+                }
+                _ => current_part.push(c),
+            }
+        }
+        parts.push(current_part.trim().to_string());
+
+        if parts.len() < 2 {
+            return Err("Invalid OR condition".into());
+        }
+
+        // 解析各个子条件
+        let mut conditions = Vec::new();
+        for part in parts {
+            let cond = if part.to_uppercase().contains(" AND ") {
+                Self::parse_and_condition(&part, table)?
+            } else if part.to_uppercase().contains(" OR ") {
+                Self::parse_or_condition(&part, table)?
+            } else {
+                Self::parse_single_condition(&part, table)?
+            };
+            conditions.push(cond);
+        }
+
+        // 组合条件 (使用any表示OR逻辑)
+        Ok(Box::new(move |row| {
+            conditions.iter().any(|cond| cond(row))
+        }))
+    }
+
 
     fn parse_single_condition(
         cond: &str,

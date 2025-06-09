@@ -1,7 +1,7 @@
 {
   "tables": [
     {
-      "name": "books_test14",
+      "name": "books_test11",
       "columns": [
         {
           "name": "id",
@@ -20,14 +20,6 @@
           "not_null": false
         },
         {
-          "name": "left_num",
-          "data_type": {
-            "Int": 10
-          },
-          "is_primary": false,
-          "not_null": false
-        },
-        {
           "name": "discription",
           "data_type": {
             "Varchar": 150
@@ -41,22 +33,20 @@
             "Int": 10
           },
           "is_primary": false,
-          "not_null": true
+          "not_null": false
         }
       ],
       "data": [
         [
           "1",
           "SETI",
-          "",
           "Search for ET",
           "32"
         ],
         [
           "2",
           "Rust Porgraming",
-          "23",
-          "",
+          "A book for rust development",
           "66"
         ]
       ]

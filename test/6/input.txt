@@ -1,0 +1,23 @@
+CREATE TABLE movies_test6 (
+    id INT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    studio_id INT NOT NULL,
+    genre_id INT NOT NULL,
+    released INT NOT NULL
+);
+
+INSERT INTO movies_test6 VALUES
+    (1,  "Stalker",             1, 1, 1979),
+    (2,  "Sicario",             2, 2, 2015),
+    (3,  "Primer",              3, 1, 2004),
+    (4,  "Heat",                4, 2, 1995),
+    (5,  "The Fountain",        4, 1, 2006),
+    (6,  "Solaris",             1, 1, 1972),
+    (7,  "Gravity",             4, 1, 2013),
+    (8,  "21 Grams",            5, 3, 2003),
+    (9,  "Birdman",             4, 4, 2014),
+    (10, "Inception",           4, 1, 2010),
+    (11, "Lost in Translation", 5, 4, 2003),
+    (12, "Eternal Sunshine of the Spotless Mind", 5, 3, 2004);
+
+SELECT title FROM movies_test6 where released > 2000;

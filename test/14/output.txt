@@ -1,0 +1,7 @@
+| id  | name | left_num | discription   | price |
+| --- | ---- | -------- | ------------- | ----- |
+| 1   | SETI |          | Search for ET | 32    |
+
+| id  | name | left_num | discription   | price |
+| --- | ---- | -------- | ------------- | ----- |
+| 1   | SETI |          | Search for ET | 32    |

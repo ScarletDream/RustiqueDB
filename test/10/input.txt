@@ -1,0 +1,15 @@
+CREATE TABLE books_test10 (
+    id INT(32) PRIMARY KEY,
+    name VARCHAR(100),
+    discription VARCHAR(150)
+);
+
+INSERT INTO books_test10 VALUES (1, "SETI", "Search for ET");
+INSERT INTO books_test10 VALUES (2, "Rust Porgraming", "A book for rust development");
+
+UPDATE books_test10 SET name="Unsold" where name="SETI";
+DELETE FROM books_test10 WHERE discription="A book for rust development";
+INSERT INTO books_test10 VALUES (2, "Rust Programing2", "Another book for rust development");
+
+-- 查询表中的所有数据
+SELECT * FROM books_test10;
