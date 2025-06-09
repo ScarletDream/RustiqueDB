@@ -337,7 +337,7 @@ impl Database {
         columns: Vec<&str>,
         condition: Option<&str>,
         order_by: Option<Vec<(&str, bool)>>  // (列名, 是否降序)
-    ) -> Result<Vec<Vec<String>>, String> {
+    ) -> Result<(Vec<Vec<String>>, bool), String> {  // 修改返回值，增加bool表示是否有数据
         let table = self.tables
             .iter()
             .find(|t| t.name == table_name)
@@ -366,6 +366,11 @@ impl Database {
             .enumerate()
             .filter(|(_, row)| filter_fn(row))
             .collect();
+
+        // 如果没有匹配的行，直接返回
+        if rows_with_indices.is_empty() {
+            return Ok((Vec::new(), false));  // 返回空结果和false表示无数据
+        }
 
         // 处理排序（如果需要）
         if let Some(cols) = order_by {
@@ -408,8 +413,9 @@ impl Database {
             })
             .collect();
 
-        Ok(result)
+        Ok((result, true))  // 返回结果和true表示有数据
     }
+
 
     pub fn parse_condition(
         cond: &str,
@@ -562,8 +568,6 @@ impl Database {
         cond: &str,
         table: &Table,
     ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
-        //println!("[DEBUG] Original condition: {}", cond);
-        
         // 分割条件，处理可能的嵌套情况
         let mut parts = Vec::new();
         let mut current_part = String::new();
@@ -572,9 +576,6 @@ impl Database {
         let mut chars = cond.chars().peekable();
 
         while let Some(c) = chars.next() {
-            //println!("[DEBUG] Processing char: '{}', in_quotes: {}, paren_depth: {}, current_part: '{}'", 
-                //c, in_quotes, paren_depth, current_part);
-
             match c {
                 '"' | '\'' => {
                     in_quotes = !in_quotes;
@@ -615,23 +616,30 @@ impl Database {
                 _ => current_part.push(c),
             }
         }
-        parts.push(current_part.trim().to_string());
         
-        //println!("[DEBUG] Split parts: {:?}", parts);
+        // 添加最后一个部分
+        if !current_part.is_empty() {
+            parts.push(current_part.trim().to_string());
+        }
 
         if parts.len() < 2 {
-            return Err("Invalid AND condition".into());
+            return Err(format!("Invalid AND condition: '{}'", cond));
         }
 
         // 解析各个子条件
         let mut conditions = Vec::new();
         for part in parts {
-            //println!("[DEBUG] Parsing part: '{}'", part);
-            let cond = Self::parse_single_condition(&part, table)?;
+            let cond = if part.to_uppercase().contains(" OR ") {
+                Self::parse_or_condition(&part, table)?
+            } else if part.to_uppercase().contains(" AND ") {
+                Self::parse_and_condition(&part, table)?
+            } else {
+                Self::parse_single_condition(&part, table)?
+            };
             conditions.push(cond);
         }
 
-        // 组合条件
+        // 组合条件 (使用all表示AND逻辑)
         Ok(Box::new(move |row| {
             conditions.iter().all(|cond| cond(row))
         }))

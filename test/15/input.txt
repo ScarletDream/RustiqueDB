@@ -1,3 +1,4 @@
+-- 创建测试表
 CREATE TABLE books_test15 (
     id INT(32) PRIMARY KEY,
     name VARCHAR(100),
@@ -6,8 +7,27 @@ CREATE TABLE books_test15 (
     price INT NOT NULL
 );
 
-INSERT INTO books_test15 (id, name, discription, price)VALUES (1, "SETI", "Search for ET", 32);
-INSERT INTO books_test15 (left_num, id, name, price) VALUES (23, 2, "Rust Porgraming", 66);
+-- 插入测试数据
+INSERT INTO books_test15 (id, name, discription, price) VALUES (1, "SETI", "Search for ET", 32);
+INSERT INTO books_test15 (left_num, id, name, price) VALUES (23, 2, "Rust Programming", 66);
+INSERT INTO books_test15 (id, name, left_num, discription, price) VALUES (3, "Database Design", 10, "Advanced database concepts", 45);
+INSERT INTO books_test15 (id, name, left_num, price) VALUES (4, "Algorithms", NULL, 99);
 
--- 查询表中的所有数据
-SELECT id, name, discription FROM books_test15 where left_num IS NULL and price < 50
+-- 测试1: 基础OR条件 - 查找特定ID或特定价格
+SELECT id, name, price FROM books_test15 WHERE id = 1 OR price = 99;
+
+-- 测试2: NULL检查OR条件 - 查找left_num为NULL或price>50的记录
+SELECT id, name, left_num, price FROM books_test15 WHERE left_num IS NULL OR price > 50;
+
+-- 测试3: 组合AND和OR - 使用括号明确优先级
+SELECT id, name, price FROM books_test15 WHERE (id = 1 OR id = 2) AND price > 30;
+
+-- 测试4: 多个OR条件 - 查找符合任一条件的记录
+SELECT id, name, discription 
+FROM books_test15 
+WHERE id = 3 OR left_num = 23 OR discription = "Search for ET";
+
+-- 测试5: 不等条件OR组合
+SELECT id, name, price 
+FROM books_test15 
+WHERE price != 32 OR left_num IS NOT NULL;
