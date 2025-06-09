@@ -337,7 +337,7 @@ impl Database {
         columns: Vec<&str>,
         condition: Option<&str>,
         order_by: Option<Vec<(&str, bool)>>  // (列名, 是否降序)
-    ) -> Result<Vec<Vec<String>>, String> {
+    ) -> Result<(Vec<Vec<String>>, bool), String> {  // 修改返回值，增加bool表示是否有数据
         let table = self.tables
             .iter()
             .find(|t| t.name == table_name)
@@ -366,6 +366,11 @@ impl Database {
             .enumerate()
             .filter(|(_, row)| filter_fn(row))
             .collect();
+
+        // 如果没有匹配的行，直接返回
+        if rows_with_indices.is_empty() {
+            return Ok((Vec::new(), false));  // 返回空结果和false表示无数据
+        }
 
         // 处理排序（如果需要）
         if let Some(cols) = order_by {
@@ -408,96 +413,245 @@ impl Database {
             })
             .collect();
 
-        Ok(result)
+        Ok((result, true))  // 返回结果和true表示有数据
     }
+
 
     pub fn parse_condition(
         cond: &str,
         table: &Table,
     ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
-        // 首先检查是否包含 OR 关键字（不区分大小写）
-        if cond.to_uppercase().contains(" OR ") {
-            return Self::parse_or_condition(cond, table);
+        let cond = cond.trim();
+        //println!("[DEBUG parse_condition] 开始解析条件: '{}'", cond);
+
+        // 处理空条件
+        if cond.is_empty() {
+            return Err("Empty condition".to_string());
         }
-        // 然后检查 AND
-        if cond.to_uppercase().contains(" AND ") {
-            return Self::parse_and_condition(cond, table);
+
+        // 1. 处理带引号的字符串中的空格问题
+        let mut in_quotes = false;
+        let mut modified_cond = String::new();
+        for c in cond.chars() {
+            match c {
+                '"' | '\'' => {
+                    in_quotes = !in_quotes;
+                    modified_cond.push(c);
+                }
+                ' ' if in_quotes => modified_cond.push('\u{00A0}'), // 替换为不可见空格
+                _ => modified_cond.push(c),
+            }
         }
-        // 最后尝试解析单个条件
-        Self::parse_single_condition(cond, table)
+
+        // 2. 处理括号内的条件
+        if modified_cond.starts_with('(') {
+            let mut paren_depth = 1;
+            let mut end_pos = 1;
+            
+            while end_pos < modified_cond.len() && paren_depth > 0 {
+                match modified_cond.chars().nth(end_pos) {
+                    Some('(') => paren_depth += 1,
+                    Some(')') => paren_depth -= 1,
+                    _ => {}
+                }
+                end_pos += 1;
+            }
+
+            if paren_depth == 0 {
+                let inside = modified_cond[1..end_pos-1].replace('\u{00A0}', " ");
+                let remaining = modified_cond[end_pos..].replace('\u{00A0}', " ");
+                let remaining = remaining.trim();
+
+                //println!("[DEBUG parse_condition] 解析括号内容: '{}', 剩余部分: '{}'", inside, remaining);
+
+                if remaining.is_empty() {
+                    return Self::parse_condition(&inside, table);
+                } else if remaining.starts_with("AND") || remaining.starts_with("OR") {
+                    // 正确处理操作符与括号剩余部分
+                    if remaining.starts_with("AND") {
+                        let right = remaining[3..].trim();
+                        let inside_cond = Self::parse_condition(&inside, table)?;
+                        let remaining_cond = Self::parse_condition(right, table)?;
+                        return Ok(Box::new(move |row| inside_cond(row) && remaining_cond(row)));
+                    } else { // OR
+                        let right = remaining[2..].trim();
+                        let inside_cond = Self::parse_condition(&inside, table)?;
+                        let remaining_cond = Self::parse_condition(right, table)?;
+                        return Ok(Box::new(move |row| inside_cond(row) || remaining_cond(row)));
+                    }
+                } else {
+                    // 默认为AND连接
+                    let inside_cond = Self::parse_condition(&inside, table)?;
+                    let remaining_cond = Self::parse_condition(remaining, table)?;
+                    return Ok(Box::new(move |row| inside_cond(row) && remaining_cond(row)));
+                }
+            }
+        }
+
+        // 3. 检查 AND 条件（优先级高于 OR）
+        if let Some(pos) = Self::find_outer_operator(&modified_cond, "AND") {
+            let left = modified_cond[..pos].trim();
+            if left.is_empty() {
+                // 如果左边为空，只解析右边
+                let right = modified_cond[pos+3..].trim().replace('\u{00A0}', " ");
+                return Self::parse_condition(&right, table);
+            }
+            
+            //println!("[DEBUG parse_condition] 发现AND条件，位置: {}", pos);
+            let left = left.replace('\u{00A0}', " ");
+            let right = modified_cond[pos+3..].trim().replace('\u{00A0}', " ");
+            //println!("[DEBUG parse_condition] 分割AND条件: left='{}', right='{}'", left, right);
+            
+            let left_cond = Self::parse_condition(&left, table)?;
+            let right_cond = Self::parse_condition(&right, table)?;
+            return Ok(Box::new(move |row| left_cond(row) && right_cond(row)));
+        }
+
+        // 4. 检查 OR 条件（优先级低于 AND）
+        if let Some(pos) = Self::find_outer_operator(&modified_cond, "OR") {
+            let left = modified_cond[..pos].trim();
+            if left.is_empty() {
+                // 如果左边为空，只解析右边
+                let right = modified_cond[pos+2..].trim().replace('\u{00A0}', " ");
+                return Self::parse_condition(&right, table);
+            }
+            
+            //println!("[DEBUG parse_condition] 发现OR条件，位置: {}", pos);
+            let left = left.replace('\u{00A0}', " ");
+            let right = modified_cond[pos+2..].trim().replace('\u{00A0}', " ");
+            //println!("[DEBUG parse_condition] 分割OR条件: left='{}', right='{}'", left, right);
+            
+            let left_cond = Self::parse_condition(&left, table)?;
+            let right_cond = Self::parse_condition(&right, table)?;
+            return Ok(Box::new(move |row| left_cond(row) || right_cond(row)));
+        }
+
+        // 5. 基础条件
+        let final_cond = modified_cond.replace('\u{00A0}', " ");
+        //println!("[DEBUG parse_condition] 解析基础条件: '{}'", final_cond);
+        Self::parse_single_condition(&final_cond, table)
     }
 
+    fn find_outer_operator(s: &str, op: &str) -> Option<usize> {
+        let s_lower = s.to_lowercase();
+        let op_lower = op.to_lowercase();
+        let mut paren_depth = 0;
+        let mut in_quotes = false;
+        let mut start = 0;
+
+        while let Some(pos) = s_lower[start..].find(&op_lower) {
+            let absolute_pos = start + pos;
+            let substr = &s[..absolute_pos];
+            
+            // 检查当前位置是否在括号外且不在引号内
+            paren_depth += substr.matches('(').count();
+            paren_depth -= substr.matches(')').count();
+            in_quotes = substr.matches('"').count() % 2 != 0 || substr.matches('\'').count() % 2 != 0;
+            
+            if paren_depth == 0 && !in_quotes {
+                // 检查是否是完整的操作符（前后有空格或是字符串边界）
+                let is_complete = (absolute_pos == 0 || s.as_bytes()[absolute_pos-1].is_ascii_whitespace()) &&
+                                 (absolute_pos + op.len() >= s.len() || s.as_bytes()[absolute_pos+op.len()].is_ascii_whitespace());
+                
+                if is_complete {
+                    return Some(absolute_pos);
+                }
+            }
+            
+            start = absolute_pos + op.len();
+        }
+        None
+    }
 
     fn parse_or_condition(
         cond: &str,
         table: &Table,
     ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
-        // 分割条件，处理可能的嵌套情况
+        let orig_cond = cond;
+        let cond = cond.trim();
+        println!("[DEBUG parse_or_condition] 开始解析条件: '{}'", cond);
+
+        // 1. 先处理最外层的括号
+        if cond.starts_with('(') && cond.ends_with(')') {
+            println!("[DEBUG parse_or_condition] 去除外层括号: '{}' -> '{}'", cond, &cond[1..cond.len()-1]);
+            return Self::parse_or_condition(&cond[1..cond.len()-1], table);
+        }
+
+        // 2. 分割条件，处理可能的嵌套情况
         let mut parts = Vec::new();
         let mut current_part = String::new();
         let mut in_quotes = false;
         let mut paren_depth = 0;
         let mut chars = cond.chars().peekable();
+        println!("[DEBUG parse_or_condition] 开始分割条件: '{}'", cond);
 
         while let Some(c) = chars.next() {
             match c {
                 '"' | '\'' => {
+                    println!("[DEBUG parse_or_condition] 遇到引号: {}", c);
                     in_quotes = !in_quotes;
                     current_part.push(c);
                 }
                 '(' if !in_quotes => {
                     paren_depth += 1;
+                    println!("[DEBUG parse_or_condition] 进入括号层({}): {}", paren_depth, current_part);
                     current_part.push(c);
                 }
                 ')' if !in_quotes => {
                     paren_depth -= 1;
+                    println!("[DEBUG parse_or_condition] 退出括号层({}): {}", paren_depth, current_part);
                     current_part.push(c);
                 }
-                _ if c.to_ascii_uppercase() == 'O' 
-                    && !in_quotes 
-                    && paren_depth == 0 
-                    && current_part.ends_with(' ') => {
-                    
-                    // 检查是否是完整的OR关键字
-                    let mut or_chars = vec!['O'];
-                    if let Some(&next_c) = chars.peek() {
-                        or_chars.push(next_c.to_ascii_uppercase());
-                        chars.next();
-                    }
-
-                    if or_chars == ['O', 'R'] && chars.peek().map_or(true, |c| c.is_whitespace()) {
-                        // 确认是OR关键字
-                        parts.push(current_part.trim().to_string());
-                        current_part.clear();
-                    } else {
-                        // 不是完整的OR，把字符加回去
+                // 处理OR关键字（不区分大小写）
+                'O' | 'o' if !in_quotes && paren_depth == 0 => {
+                    println!("[DEBUG parse_or_condition] 可能遇到OR关键字");
+                    if let Some('R') | Some('r') = chars.peek() {
+                        let next = chars.next().unwrap();
+                        println!("[DEBUG parse_or_condition] 确认OR关键字: {}{}", c, next);
+                        if chars.peek().map_or(true, |c| c.is_whitespace()) || chars.peek().is_none() {
+                            // 确认是OR关键字
+                            println!("[DEBUG parse_or_condition] 完成OR分割，当前部分: '{}'", current_part);
+                            parts.push(current_part.trim().to_string());
+                            current_part.clear();
+                            continue;
+                        }
                         current_part.push(c);
-                        current_part.extend(&or_chars[1..]);
+                        current_part.push(next);
+                    } else {
+                        current_part.push(c);
                     }
                 }
-                _ => current_part.push(c),
+                _ => {
+                    current_part.push(c);
+                }
             }
+            //println!("[DEBUG parse_or_condition] 当前部分构建: '{}'", current_part);
         }
-        parts.push(current_part.trim().to_string());
+        
+        if !current_part.is_empty() {
+            //println!("[DEBUG parse_or_condition] 添加最后部分: '{}'", current_part);
+            parts.push(current_part.trim().to_string());
+        }
+
+        //println!("[DEBUG parse_or_condition] 分割结果: {:?}", parts);
 
         if parts.len() < 2 {
-            return Err("Invalid OR condition".into());
+            //println!("[DEBUG parse_or_condition] 错误: 无效的OR条件，分割部分不足2个");
+            return Err(format!("Invalid OR condition in: '{}'", orig_cond));
         }
 
-        // 解析各个子条件
+        // 3. 解析各个子条件
         let mut conditions = Vec::new();
-        for part in parts {
-            let cond = if part.to_uppercase().contains(" AND ") {
-                Self::parse_and_condition(&part, table)?
-            } else if part.to_uppercase().contains(" OR ") {
-                Self::parse_or_condition(&part, table)?
-            } else {
-                Self::parse_single_condition(&part, table)?
-            };
+        for (i, part) in parts.iter().enumerate() {
+            //println!("[DEBUG parse_or_condition] 解析子条件 {}: '{}'", i+1, part);
+            let cond = Self::parse_condition(part, table).map_err(|e| {
+                //println!("[DEBUG parse_or_condition] 子条件解析错误: {}", e);
+                e
+            })?;
             conditions.push(cond);
         }
 
-        // 组合条件 (使用any表示OR逻辑)
+        // 4. 组合条件 (使用any表示OR逻辑)
         Ok(Box::new(move |row| {
             conditions.iter().any(|cond| cond(row))
         }))
@@ -562,8 +716,14 @@ impl Database {
         cond: &str,
         table: &Table,
     ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
-        //println!("[DEBUG] Original condition: {}", cond);
+        // 分割条件，处理可能的嵌套情况
+
+        let cond = cond.trim();
         
+        // 1. 先处理最外层的括号
+        if cond.starts_with('(') && cond.ends_with(')') {
+            return Self::parse_and_condition(&cond[1..cond.len()-1], table);
+        }
         // 分割条件，处理可能的嵌套情况
         let mut parts = Vec::new();
         let mut current_part = String::new();
@@ -572,9 +732,6 @@ impl Database {
         let mut chars = cond.chars().peekable();
 
         while let Some(c) = chars.next() {
-            //println!("[DEBUG] Processing char: '{}', in_quotes: {}, paren_depth: {}, current_part: '{}'", 
-                //c, in_quotes, paren_depth, current_part);
-
             match c {
                 '"' | '\'' => {
                     in_quotes = !in_quotes;
@@ -615,23 +772,30 @@ impl Database {
                 _ => current_part.push(c),
             }
         }
-        parts.push(current_part.trim().to_string());
         
-        //println!("[DEBUG] Split parts: {:?}", parts);
+        // 添加最后一个部分
+        if !current_part.is_empty() {
+            parts.push(current_part.trim().to_string());
+        }
 
         if parts.len() < 2 {
-            return Err("Invalid AND condition".into());
+            return Err(format!("Invalid AND condition: '{}'", cond));
         }
 
         // 解析各个子条件
         let mut conditions = Vec::new();
         for part in parts {
-            //println!("[DEBUG] Parsing part: '{}'", part);
-            let cond = Self::parse_single_condition(&part, table)?;
+            let cond = if part.to_uppercase().contains(" OR ") {
+                Self::parse_or_condition(&part, table)?
+            } else if part.to_uppercase().contains(" AND ") {
+                Self::parse_and_condition(&part, table)?
+            } else {
+                Self::parse_single_condition(&part, table)?
+            };
             conditions.push(cond);
         }
 
-        // 组合条件
+        // 组合条件 (使用all表示AND逻辑)
         Ok(Box::new(move |row| {
             conditions.iter().all(|cond| cond(row))
         }))

@@ -1,7 +1,7 @@
 {
   "tables": [
     {
-      "name": "books_test11",
+      "name": "books_test15",
       "columns": [
         {
           "name": "id",
@@ -20,6 +20,14 @@
           "not_null": false
         },
         {
+          "name": "left_num",
+          "data_type": {
+            "Int": 10
+          },
+          "is_primary": false,
+          "not_null": false
+        },
+        {
           "name": "discription",
           "data_type": {
             "Varchar": 150
@@ -33,21 +41,65 @@
             "Int": 10
           },
           "is_primary": false,
-          "not_null": false
+          "not_null": true
         }
       ],
       "data": [
         [
           "1",
           "SETI",
+          "",
           "Search for ET",
           "32"
         ],
         [
           "2",
-          "Rust Porgraming",
-          "A book for rust development",
+          "Rust Programming",
+          "",
+          "Learn Rust programming language",
           "66"
+        ],
+        [
+          "3",
+          "Database Design",
+          "",
+          "Advanced database concepts",
+          "45"
+        ],
+        [
+          "4",
+          "Algorithms",
+          "",
+          "",
+          "99"
+        ],
+        [
+          "5",
+          "Web Development",
+          "",
+          "Build modern web applications",
+          "55"
+        ],
+        [
+          "6",
+          "Data Science",
+          "",
+          "Introduction to data science",
+          "75"
+        ],
+        [
+          "7",
+          "Machine Learning",
+          "",
+          "Fundamentals of ML",
+          "88"
+        ],
+        [
+          "8",
+          "Computer Networks",
+          "",
+          "Networking basics",
+          "42"
         ]
       ]
     }

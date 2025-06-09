@@ -60,9 +60,9 @@ pub fn execute_sql(sql_statement: &str) -> bool {
     let statements_len = statements.len();
 
     for stmt in statements {
-        //if has_error {
-        //    continue;
-        //}
+        if has_error {
+            continue;
+        }
         match parse_sql(stmt) {
             Ok(ast) => {
                 match ast {
@@ -74,29 +74,34 @@ pub fn execute_sql(sql_statement: &str) -> bool {
                             .collect::<Vec<_>>();
 
                         match db.select(&table, cols_ref, cond_str, Some(order_by_ref)) {
-                            Ok(data) if !data.is_empty() => {
-                                has_output = true;
-                                let formatted = format_table_from_db(
-                                    &db, 
-                                    &table, 
-                                    columns.iter().map(|s| s.as_str()).collect(), 
-                                    data
-                                );
-                                match formatted {
-                                    Ok(table_str) => print!("{}\n", table_str),
-                                    Err(e) => {
-                                        eprint!("{}\n", e);
-                                        has_error = true;
-                                    },
+                            Ok((data, has_data)) => {
+                                if has_data {
+                                    has_output = true;
+                                    let formatted = format_table_from_db(
+                                        &db, 
+                                        &table, 
+                                        columns.iter().map(|s| s.as_str()).collect(), 
+                                        data
+                                    );
+                                    match formatted {
+                                        Ok(table_str) => print!("{}\n", table_str),
+                                        Err(e) => {
+                                            eprint!("{}\n", e);
+                                            has_error = true;
+                                        },
+                                    }
+                                } else {
+                                    // 没有匹配的数据，且是唯一的SELECT语句时，会由外层统一处理
+                                    has_output = false;
                                 }
                             }
-                            Ok(_) => {}
                             Err(e) => {
                                 eprint!("{}\n", e);
                                 has_error = true;
                             },
                         }
                     }
+
                     SqlAst::Calculate { expression, result } => {
                         has_output = true;
                         let headers = vec![expression];
