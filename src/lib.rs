@@ -60,9 +60,9 @@ pub fn execute_sql(sql_statement: &str) -> bool {
     let statements_len = statements.len();
 
     for stmt in statements {
-        if has_error {
-            continue;
-        }
+        //if has_error {
+        //    continue;
+        //}
         match parse_sql(stmt) {
             Ok(ast) => {
                 match ast {
@@ -124,12 +124,12 @@ pub fn execute_sql(sql_statement: &str) -> bool {
                             Err(e) => {
                                 if e.contains("doesn't have a default value") {
                                     let col_name = e.split('\'').nth(1).unwrap_or("");
-                                    eprint!("Error: Field '{}' doesn't have a default value\n", col_name);
+                                    print!("Error: Field '{}' doesn't have a default value\n", col_name);
                                 } else if e.contains("Duplicate entry") {
                                     let value = e.split('\'').nth(1).unwrap_or("");
-                                    eprint!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
+                                    print!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
                                 } else {
-                                    eprint!("Error: {}\n", e);
+                                    print!("Error: {}\n", e);
                                 }
                                 has_error = true;
                             },
@@ -145,12 +145,12 @@ pub fn execute_sql(sql_statement: &str) -> bool {
                             Err(e) => {
                                 if e.contains("doesn't have a default value") {
                                     let col_name = e.split('\'').nth(1).unwrap_or("");
-                                    eprint!("Error: Field '{}' doesn't have a default value\n", col_name);
+                                    print!("Error: Field '{}' doesn't have a default value\n", col_name);
                                 } else if e.contains("Duplicate entry") {
                                     let value = e.split('\'').nth(1).unwrap_or("");
-                                    eprint!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
+                                    print!("Error: Duplicate entry '{}' for key 'PRIMARY'\n", value);
                                 } else {
-                                    eprint!("Error: {}\n", e);
+                                    print!("Error: {}\n", e);
                                 }
                                 has_error = true;
                             },
@@ -184,7 +184,7 @@ pub fn execute_sql(sql_statement: &str) -> bool {
                 }
             }
             Err(e) => {
-                eprint!("Error: Syntax error\n");
+                print!("Error: Syntax error\n");
                 has_error = true;
             }
         }

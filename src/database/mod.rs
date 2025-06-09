@@ -415,12 +415,94 @@ impl Database {
         cond: &str,
         table: &Table,
     ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
-        // 首先检查是否包含 AND 关键字（不区分大小写）
+        // 首先检查是否包含 OR 关键字（不区分大小写）
+        if cond.to_uppercase().contains(" OR ") {
+            return Self::parse_or_condition(cond, table);
+        }
+        // 然后检查 AND
         if cond.to_uppercase().contains(" AND ") {
             return Self::parse_and_condition(cond, table);
         }
+        // 最后尝试解析单个条件
         Self::parse_single_condition(cond, table)
     }
+
+
+    fn parse_or_condition(
+        cond: &str,
+        table: &Table,
+    ) -> Result<Box<dyn Fn(&[String]) -> bool>, String> {
+        // 分割条件，处理可能的嵌套情况
+        let mut parts = Vec::new();
+        let mut current_part = String::new();
+        let mut in_quotes = false;
+        let mut paren_depth = 0;
+        let mut chars = cond.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                '"' | '\'' => {
+                    in_quotes = !in_quotes;
+                    current_part.push(c);
+                }
+                '(' if !in_quotes => {
+                    paren_depth += 1;
+                    current_part.push(c);
+                }
+                ')' if !in_quotes => {
+                    paren_depth -= 1;
+                    current_part.push(c);
+                }
+                _ if c.to_ascii_uppercase() == 'O' 
+                    && !in_quotes 
+                    && paren_depth == 0 
+                    && current_part.ends_with(' ') => {
+                    
+                    // 检查是否是完整的OR关键字
+                    let mut or_chars = vec!['O'];
+                    if let Some(&next_c) = chars.peek() {
+                        or_chars.push(next_c.to_ascii_uppercase());
+                        chars.next();
+                    }
+
+                    if or_chars == ['O', 'R'] && chars.peek().map_or(true, |c| c.is_whitespace()) {
+                        // 确认是OR关键字
+                        parts.push(current_part.trim().to_string());
+                        current_part.clear();
+                    } else {
+                        // 不是完整的OR，把字符加回去
+                        current_part.push(c);
+                        current_part.extend(&or_chars[1..]);
+                    }
+                }
+                _ => current_part.push(c),
+            }
+        }
+        parts.push(current_part.trim().to_string());
+
+        if parts.len() < 2 {
+            return Err("Invalid OR condition".into());
+        }
+
+        // 解析各个子条件
+        let mut conditions = Vec::new();
+        for part in parts {
+            let cond = if part.to_uppercase().contains(" AND ") {
+                Self::parse_and_condition(&part, table)?
+            } else if part.to_uppercase().contains(" OR ") {
+                Self::parse_or_condition(&part, table)?
+            } else {
+                Self::parse_single_condition(&part, table)?
+            };
+            conditions.push(cond);
+        }
+
+        // 组合条件 (使用any表示OR逻辑)
+        Ok(Box::new(move |row| {
+            conditions.iter().any(|cond| cond(row))
+        }))
+    }
+
 
     fn parse_single_condition(
         cond: &str,
