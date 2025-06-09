@@ -55,14 +55,14 @@
         [
           "2",
           "Rust Programming",
-          "23",
           "",
+          "Learn Rust programming language",
           "66"
         ],
         [
           "3",
           "Database Design",
-          "10",
+          "",
           "Advanced database concepts",
           "45"
         ],
@@ -72,6 +72,34 @@
           "",
           "",
           "99"
+        ],
+        [
+          "5",
+          "Web Development",
+          "",
+          "Build modern web applications",
+          "55"
+        ],
+        [
+          "6",
+          "Data Science",
+          "",
+          "Introduction to data science",
+          "75"
+        ],
+        [
+          "7",
+          "Machine Learning",
+          "",
+          "Fundamentals of ML",
+          "88"
+        ],
+        [
+          "8",
+          "Computer Networks",
+          "",
+          "Networking basics",
+          "42"
         ]
       ]
     }

@@ -8,26 +8,38 @@ CREATE TABLE books_test15 (
 );
 
 -- 插入测试数据
-INSERT INTO books_test15 (id, name, discription, price) VALUES (1, "SETI", "Search for ET", 32);
-INSERT INTO books_test15 (left_num, id, name, price) VALUES (23, 2, "Rust Programming", 66);
-INSERT INTO books_test15 (id, name, left_num, discription, price) VALUES (3, "Database Design", 10, "Advanced database concepts", 45);
-INSERT INTO books_test15 (id, name, left_num, price) VALUES (4, "Algorithms", NULL, 99);
+INSERT INTO books_test15 (id, name, discription, price) VALUES 
+(1, "SETI", "Search for ET", 32),
+(2, "Rust Programming", "Learn Rust programming language", 66),
+(3, "Database Design", "Advanced database concepts", 45),
+(4, "Algorithms", NULL, 99),
+(5, "Web Development", "Build modern web applications", 55),
+(6, "Data Science", "Introduction to data science", 75),
+(7, "Machine Learning", "Fundamentals of ML", 88),
+(8, "Computer Networks", "Networking basics", 42);
 
--- 测试1: 基础OR条件 - 查找特定ID或特定价格
-SELECT id, name, price FROM books_test15 WHERE id = 1 OR price = 99;
 
--- 测试2: NULL检查OR条件 - 查找left_num为NULL或price>50的记录
-SELECT id, name, left_num, price FROM books_test15 WHERE left_num IS NULL OR price > 50;
+-- 测试5: 多列AND条件
+SELECT id, name, price, left_num FROM books_test15
+WHERE price > 40 AND price < 70 AND left_num IS NOT NULL;
 
--- 测试3: 组合AND和OR - 使用括号明确优先级
-SELECT id, name, price FROM books_test15 WHERE (id = 1 OR id = 2) AND price > 30;
+-- 测试6: 嵌套条件查询
+SELECT id, name FROM books_test15
+WHERE (id = 5 OR (price > 60 AND price < 80)) AND name = "Data Science";
 
--- 测试4: 多个OR条件 - 查找符合任一条件的记录
-SELECT id, name, discription 
-FROM books_test15 
-WHERE id = 3 OR left_num = 23 OR discription = "Search for ET";
+-- 测试7: 多组括号组合条件
+SELECT id, name, price FROM books_test15
+WHERE ((id = 1 OR id = 4) AND price > 30) OR (price = 42);
 
--- 测试5: 不等条件OR组合
-SELECT id, name, price 
-FROM books_test15 
-WHERE price != 32 OR left_num IS NOT NULL;
+-- 测试8: 多条件组合查询
+SELECT id, name, discription, price FROM books_test15
+WHERE (price >= 50 OR id <= 2) AND (name = "Rust Programming" OR name = "Web Development");
+
+-- 测试9: 多级嵌套条件
+SELECT id, name, price FROM books_test15
+WHERE (id = 7 OR (price > 40 AND (name = "Database Design" OR left_num = 10)));
+
+-- 测试10: 复杂组合条件
+SELECT id, name, discription, price FROM books_test15
+WHERE ((id = 3 AND price = 45) OR (price > 60 AND price < 90)) 
+AND (discription IS NOT NULL OR name = "Algorithms");
