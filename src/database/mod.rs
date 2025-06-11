@@ -8,7 +8,20 @@ use crate::history::CommandHistory;
 pub struct Database {
     pub tables: Vec<Table>,
     #[serde(default)]
-    pub command_history: Vec<String>, // 历史命令存储
+    pub command_history: Vec<String>,     // 历史记录
+    #[serde(skip)]
+    pub snapshots: Vec<DatabaseSnapshot>, // 快照栈
+}
+
+#[derive(Debug, Clone)]
+pub struct DatabaseSnapshot {
+    pub tables: Vec<TableSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TableSnapshot {
+    pub name: String,
+    pub data: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,6 +50,7 @@ impl Database {
         Self {
             tables: Vec::new(),
             command_history: Vec::new(),
+            snapshots: Vec::new(),
         }
     }
 
@@ -74,9 +88,11 @@ impl Database {
     pub fn insert(
         &mut self,
         table_name: &str,
-        columns: Option<Vec<String>>, // 新增：可选列名列表
+        columns: Option<Vec<String>>,
         values: Vec<Vec<&str>>,
     ) -> Result<usize, String> {
+        self.take_snapshot(); // 在执行前保存快照
+
         let table = self.tables.iter_mut()
             .find(|t| t.name == table_name)
             .ok_or("Table not found")?;
@@ -152,9 +168,11 @@ impl Database {
     pub fn update(
         &mut self,
         table_name: &str,
-        set: Vec<(String, String)>,  // 已修改为 String
+        set: Vec<(String, String)>,
         condition: Option<&str>,
     ) -> Result<usize, String> {
+        self.take_snapshot(); // 在执行前保存快照
+
         // 1. 获取表的可变引用
         let table = self.tables
             .iter_mut()
@@ -238,6 +256,8 @@ impl Database {
     }
 
     pub fn delete(&mut self,table_name: &str,condition: Option<&str>,) -> Result<usize, String> {
+        self.take_snapshot(); // 在执行前保存快照
+
         // 1. 获取表的可变引用
         let table = self.tables
             .iter_mut()
@@ -563,5 +583,34 @@ impl Database {
         }))
     }
 
+    pub fn undo(&mut self) -> Result<usize, String> {
+        self.restore_snapshot()
+    }
 
+    // 创建当前状态快照
+    pub fn take_snapshot(&mut self) {
+        let snapshot = DatabaseSnapshot {
+            tables: self.tables.iter()
+                .map(|t| TableSnapshot {
+                    name: t.name.clone(),
+                    data: t.data.clone()
+                })
+                .collect()
+        };
+        self.snapshots.push(snapshot);
+    }
+
+    // 恢复到上一个快照
+    pub fn restore_snapshot(&mut self) -> Result<usize, String> {
+        if let Some(snapshot) = self.snapshots.pop() {
+            for table in &mut self.tables {
+                if let Some(snap) = snapshot.tables.iter().find(|t| t.name == table.name) {
+                    table.data = snap.data.clone();
+                }
+            }
+            Ok(1)
+        } else {
+            Err("No snapshot to restore".into())
+        }
+    }
 }

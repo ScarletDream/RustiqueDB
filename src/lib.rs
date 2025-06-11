@@ -59,12 +59,6 @@ pub fn execute_sql(
     }
     // 处理注释
     let clean_sql = remove_comments(sql_statement);
-    
-    // 加载数据库
-    let mut db = match Database::load() {
-        Ok(db) => db,
-        Err(_) => Database::new(),
-    };
 
     // 分割SQL语句（支持分号分隔的多条语句）
     let statements: Vec<&str> = clean_sql.split(';')

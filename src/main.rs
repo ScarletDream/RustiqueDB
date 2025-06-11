@@ -165,6 +165,18 @@ fn main() {
                 }
                 continue;
             },
+            "UNDO" | "UNDO;" => {
+                match db.undo() {
+                    Ok(_) => println!("Database state restored from snapshot"),
+                    Err(e) => eprintln!("Undo failed: {}", e),
+                }
+                continue;
+            },
+            "SNAPSHOT" | "SNAPSHOT;" => {
+                db.take_snapshot();
+                println!("Snapshot taken (count: {})", db.snapshots.len());
+                continue;
+            },
             _ => {}
         }
 
