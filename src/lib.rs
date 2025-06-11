@@ -2,10 +2,12 @@ pub mod database;
 pub mod error;
 pub mod format;
 pub mod parser;
+pub mod history;
 
 use crate::database::{Database, Table};
 use crate::format::{format_table, format_table_from_db};
 use crate::parser::{parse_sql, SqlAst};
+pub use history::CommandHistory;
 
 // 添加注释处理函数
 fn remove_comments(input: &str) -> String {
@@ -47,17 +49,24 @@ fn remove_comments(input: &str) -> String {
     result
 }
 
-pub fn execute_sql(sql_statement: &str) -> bool {
-    // 1. 先处理注释
+pub fn execute_sql(
+    sql_statement: &str,
+    db: &mut database::Database,
+    history: &mut history::CommandHistory
+) -> bool {
+    if sql_statement.trim().to_uppercase() == "HISTORY" {
+        return false;
+    }
+    // 处理注释
     let clean_sql = remove_comments(sql_statement);
     
-    // 2. 加载数据库
+    // 加载数据库
     let mut db = match Database::load() {
         Ok(db) => db,
         Err(_) => Database::new(),
     };
 
-    // 3. 分割SQL语句（支持分号分隔的多条语句）
+    // 分割SQL语句（支持分号分隔的多条语句）
     let statements: Vec<&str> = clean_sql.split(';')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
@@ -67,7 +76,7 @@ pub fn execute_sql(sql_statement: &str) -> bool {
     let mut has_error = false;
     let statements_len = statements.len();
 
-    // 4. 处理每条SQL语句
+    // 处理每条SQL语句
     for stmt in statements {
         match parse_sql(stmt) {
             Ok(ast) => {
@@ -197,12 +206,12 @@ pub fn execute_sql(sql_statement: &str) -> bool {
         }
     }
 
-    // 5. 如果没有输出任何结果（且没有错误），显示提示信息
+    // 如果没有输出任何结果（且没有错误），显示提示信息
     if !has_output && !has_error && statements_len > 0 {
         println!("There are no results to be displayed.");
     }
 
-    // 6. 保存数据库
+    // 保存数据库
     if let Err(e) = db.save() {
         eprintln!("Failed to save database: {}", e);
         return false;

@@ -3,6 +3,8 @@ use rustique_db::database::{Database, DataType};
 use rustique_db::format::format_table;
 use rustique_db::format::format_table_from_db;
 use rustique_db::parser::{parse_sql, SqlAst};
+use rustique_db::history::CommandHistory;
+use rustique_db::execute_sql;
 
 // 注释处理
 fn remove_comments(input: &str) -> &str {
@@ -42,9 +44,65 @@ fn remove_comments(input: &str) -> &str {
     &input[..last_valid_pos]
 }
 
+// 带历史支持的输入读取
+fn read_input_with_history(prompt: &str, history: &mut CommandHistory) -> String {
+    let mut input = String::new();
+    let mut is_multiline = false;
+
+    loop {
+        print!("{}", if is_multiline { "...> " } else { prompt });
+        io::stdout().flush().unwrap();
+
+        let mut line = String::new();
+        io::stdin().read_line(&mut line).unwrap();
+
+        // 处理历史命令导航（仅在第一行）
+        if !is_multiline {
+            match line.trim_end() {
+                "\x1b[A" => { // 上箭头
+                    if let Some(cmd) = history.get_previous() {
+                        input = cmd.to_string();
+                        print!("\r\x1b[K{}{}", prompt, input);
+                        continue;
+                    }
+                }
+                "\x1b[B" => { // 下箭头
+                    if let Some(cmd) = history.get_next() {
+                        input = cmd.to_string();
+                        print!("\r\x1b[K{}{}", prompt, input);
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        input.push_str(&line);
+
+        // 检查结束条件（分号或exit）
+        let trimmed = input.trim();
+        if trimmed.ends_with(';') || trimmed.eq_ignore_ascii_case("exit") {
+            break;
+        }
+
+        is_multiline = true;
+    }
+
+    input.trim().to_string()
+}
+
+fn should_exit(input: &str) -> bool {
+    let trimmed = input.trim().to_lowercase();
+    trimmed == "exit" || trimmed == "exit;" || trimmed == "quit" || trimmed == "quit;"
+}
+
+fn clean_command_arg(input: &str) -> &str {
+    input.trim().trim_end_matches(';').trim()
+}
+
 fn main() {
-    // 加载或创建数据库
-    let mut db = Database::load().unwrap_or_else(|_| {
+    let mut history = CommandHistory::new(100);
+    let mut db = Database::load_with_history(&mut history).unwrap_or_else(|_| {
         println!("Creating new database...");
         Database::new()
     });
@@ -53,23 +111,17 @@ fn main() {
     println!("Database loaded with {} tables", db.tables.len());
     
     println!("Enter SQL commands (type 'exit' to quit, use ; to end commands):");
+
+    println!("Special commands:");
+    println!("  !!;       - 重复上一条命令");
+    println!("  !n;       - 执行历史记录中第n条命令");
+    println!("  HISTORY;  - 显示所有历史命令");
+    println!("  CLEAR;    - 清空历史记录");
     
     loop {
-        print!("sql> ");
-        io::stdout().flush().unwrap();
+        let input = read_input_with_history("sql> ", &mut history);
 
-        let mut input = String::new();
-        
-        // 读取初始行
-        if io::stdin().read_line(&mut input).is_err() {
-            println!("Failed to read input.");
-            continue;
-        }
-
-        // 检查退出命令
-        let trimmed = input.trim_end().to_lowercase();
-        if trimmed == "exit" || trimmed == "exit;" {
-            // 退出前保存数据库
+        if should_exit(&input) {
             if let Err(e) = db.save() {
                 eprintln!("Failed to save database: {}", e);
             }
@@ -77,141 +129,48 @@ fn main() {
             break;
         }
 
-        // 多行输入处理
-        while !input.trim_end().ends_with(';') {
-            print!("...> ");
-            io::stdout().flush().unwrap();
+        let trimmed = input.trim();
 
-            let mut next_line = String::new();
-            if io::stdin().read_line(&mut next_line).is_err() {
-                println!("Failed to read input.");
-                break;
-            }
-            
-            input.push_str(&next_line);
-            
-            // 再次检查退出命令（可能在多行输入中）
-            let full_trimmed = input.trim_end().to_lowercase();
-            if full_trimmed == "exit" || full_trimmed == "exit;" {
-                if let Err(e) = db.save() {
-                    eprintln!("Failed to save database: {}", e);
+        // 特殊命令处理
+        match trimmed {
+            "HISTORY" | "HISTORY;" => {
+                for (i, cmd) in history.enumerate() {
+                    println!("{:4}: {}", i, cmd.trim());
                 }
-                println!("Goodbye!");
-                return;
-            }
+                continue;
+            },
+            "CLEAR" | "CLEAR;" => {
+                history.clear();
+                println!("Command history cleared");
+                continue;
+            },
+            "!!" | "!!;" => {
+                if let Some(last) = history.get_full_command(history.len().saturating_sub(1)) {
+                    println!("Re-executing: {}", last.trim());
+                    let _ = execute_sql(&last, &mut db, &mut history);
+                }
+                continue;
+            },
+            cmd if cmd.starts_with('!') => {
+                let arg = clean_command_arg(&cmd[1..]); // 清理参数
+                if let Ok(n) = arg.parse::<usize>() {
+                    if let Some(cmd) = history.get_full_command(n) {
+                        println!("Executing #{}: {}", n, cmd.trim());
+                        let _ = execute_sql(&cmd, &mut db, &mut history);
+                    } else {
+                        eprintln!("Error: No history entry at index {}", n);
+                    }
+                } else {
+                    eprintln!("Error: Invalid history index '{}'", arg);
+                }
+                continue;
+            },
+            _ => {}
         }
 
-        // 移除
-        let sql_input = remove_comments(&input)
-            .trim()
-            .trim_end_matches(';')
-            .trim();
-
-        if sql_input.is_empty() {
-            continue;
-        }
-
-        match parse_sql(sql_input) {
-            Ok(ast) => {
-                match ast {
-                    SqlAst::Select { table, columns, where_clause, order_by } => {
-                        let cols_ref: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
-                        let cond_str = where_clause.as_deref();
-
-                        let order_by_ref: Vec<(&str, bool)> = order_by
-                            .iter()
-                            .map(|(col, desc)| (col.as_str(), *desc))
-                            .collect();
-                        
-                        match db.select(&table, cols_ref, cond_str, Some(order_by_ref)) {
-                            Ok(data) => {
-                                match format_table_from_db(&db, &table, columns.iter().map(|s| s.as_str()).collect(), data) {
-                                    Ok(table_str) => println!("{}", table_str),
-                                    Err(e) => eprintln!("Format error: {}", e),
-                                }
-                            }
-                            Err(e) => eprintln!("Select error: {}", e),
-                        }
-                    }
-                    SqlAst::Calculate { expression, result } => {
-                        let headers = vec![expression.clone()];
-                        let data = vec![vec![result.to_string()]];
-                        println!("{}", format_table(headers, data));
-                    }
-                    SqlAst::CreateTable { table_name, columns } => {
-                        // 将列定义转换为数据库需要的格式
-                        let col_defs: Vec<(&str, DataType, bool, bool)> = columns.iter()
-                            .map(|(name, dt, pk, nn)| (name.as_str(), dt.clone(), *pk, *nn))
-                            .collect();
-                        
-                        // 正确调用 create_table（不处理返回值）
-                        db.create_table(&table_name, col_defs);
-                        println!("Table '{}' created successfully", table_name);
-                        
-                        // 保存数据库
-                        if let Err(e) = db.save() {
-                            eprintln!("Failed to save database: {}", e);
-                        }
-                    }
-                    SqlAst::Insert { table, columns, values } => {
-                        // 转换为 Vec<Vec<&str>> 供数据库处理
-                        let values_ref: Vec<Vec<&str>> = values.iter()
-                            .map(|row| row.iter().map(|s| s.as_str()).collect())
-                            .collect();
-                        
-                        match db.insert(&table, columns, values_ref) {  // 直接传入 columns
-                            Ok(count) => {
-                                println!("{} row(s) inserted", count);
-                                if let Err(e) = db.save() {
-                                    eprintln!("Failed to save database: {}", e);
-                                }
-                            }
-                            Err(e) => eprintln!("Insert error: {}", e),
-                        }
-                    }
-
-
-                    SqlAst::Update { table, set, where_clause } => {
-                        let cond_str = where_clause.as_deref();
-                        let set_ref = set;  // 直接使用 Vec<(String, String)>
-
-                        match db.update(&table, set_ref, cond_str) {
-                            Ok(count) => {
-                                println!("{} row(s) updated", count);
-                                // 保存数据库
-                                if let Err(e) = db.save() {
-                                    eprintln!("Failed to save database: {}", e);
-                                }
-                            }
-                            Err(e) => eprintln!("Update error: {}", e),
-                        }
-                    }
-                    SqlAst::Delete { table, where_clause } => {
-                        let cond_str = where_clause.as_deref();
-                        
-                        match db.delete(&table, cond_str) {
-                            Ok(count) => {
-                                println!("{} row(s) deleted", count);
-                                // 保存数据库
-                                if let Err(e) = db.save() {
-                                    eprintln!("Failed to save database: {}", e);
-                                }
-                            }
-                            Err(e) => eprintln!("Delete error: {}", e),
-                        }
-                    }
-                    SqlAst::Drop { tables, if_exists } => {
-                        match db.drop_tables(&tables, if_exists) {
-                            Ok(count) => {
-                                println!("Dropped {} table(s)", count);
-                                db.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
-                            }
-                            Err(e) => eprintln!("Drop error: {}", e),
-                        }
-                    }   
-                }
-            }
-            Err(e) => eprintln!("Parse error: {}", e),
+        if !trimmed.is_empty() {
+            history.add(&input);
+            let _ = execute_sql(trimmed, &mut db, &mut history);
         }
     }
 }

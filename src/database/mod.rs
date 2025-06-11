@@ -1,11 +1,14 @@
 use serde::{Serialize, Deserialize};
 use std::fs;
 use std::path::Path;
+use crate::history::CommandHistory;
 
 // 为所有需要序列化的类型添加derive
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
     pub tables: Vec<Table>,
+    #[serde(default)]
+    pub command_history: Vec<String>, // 历史命令存储
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,7 +34,10 @@ pub struct Column {
 
 impl Database {
     pub fn new() -> Self {
-        Self { tables: Vec::new() }
+        Self {
+            tables: Vec::new(),
+            command_history: Vec::new(),
+        }
     }
 
     // 创建表方法
@@ -287,6 +293,25 @@ impl Database {
         // 读取并反序列化
         let json = fs::read_to_string("data/db.json").map_err(|e| e.to_string())?;
         serde_json::from_str(&json).map_err(|e| e.to_string())
+    }
+
+    pub fn load_with_history(history: &mut CommandHistory) -> Result<Self, String> {
+        if !Path::new("data/db.json").exists() {
+            return Ok(Database::new());
+        }
+
+        let json = fs::read_to_string("data/db.json")
+            .map_err(|e| format!("Failed to read db.json: {}", e))?;
+
+        let mut db: Database = serde_json::from_str(&json)
+            .map_err(|e| format!("Failed to parse db.json: {}", e))?;
+
+        // 加载历史记录
+        for cmd in db.command_history.drain(..) {
+            history.add(cmd.as_str());
+        }
+
+        Ok(db)
     }
 
     pub fn drop_tables(&mut self, table_names: &[String], if_exists: bool) -> Result<usize, String> {
